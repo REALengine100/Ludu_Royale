@@ -35,18 +35,38 @@ jobs:
           # Update Kotlin version in settings.gradle
           sed -i 's/version "1.[0-9].[0-9]*" apply false/version "1.9.24" apply false/g' android/settings.gradle || true
           
-      - name: Flatten and normalize imports in lib/
+      - name: Flatten files and fix imports automatically
         run: |
-          cd lib
-          rm -rf screens services || true
-          for f in *.dart; do
-            sed -i "s|import 'screens/|import '|g" "$f"
-            sed -i "s|import 'services/|import '|g" "$f"
-            sed -i "s|import \"screens/|import \"|g" "$f"
-            sed -i "s|import \"services/|import \"|g" "$f"
-            sed -i "s|import '\.\./|import '|g" "$f"
-            sed -i "s|import \"\.\./|import \"|g" "$f"
-          done
+          python3 -c "
+          import os, glob, re, shutil
+          os.chdir('lib')
+          for root, dirs, files in os.walk('.'):
+              if root == '.':
+                  continue
+              for file in files:
+                  if file.endswith('.dart'):
+                      src = os.path.join(root, file)
+                      dst = file
+                      if not os.path.exists(dst):
+                          os.rename(src, dst)
+          for d in ['screens', 'services']:
+              if os.path.exists(d):
+                  shutil.rmtree(d)
+          
+          for fn in glob.glob('*.dart'):
+              with open(fn, 'r', encoding='utf-8') as f:
+                  content = f.read()
+              def fix_import(match):
+                  quote = match.group(1)
+                  path = match.group(2)
+                  if path.startswith('package:'):
+                      return f'import {quote}{path}{quote}'
+                  filename = os.path.basename(path)
+                  return f'import {quote}{filename}{quote}'
+              content = re.sub(r\"import\s+(['\"])(.*?)(['\"])\", fix_import, content)
+              with open(fn, 'w', encoding='utf-8') as f:
+                  f.write(content)
+          "
           
       - name: Install dependencies
         run: flutter pub get
