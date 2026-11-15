@@ -1,34 +1,43 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'splash_screen.dart';
-import 'ad_manager.dart';
-import 'app_settings.dart';
-import 'sfx.dart';
+import 'screens/splash_screen.dart';
+import 'services/ad_manager.dart';
+import 'services/app_settings.dart';
+import 'services/sfx.dart';
+import 'dart:async';
 
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-  
-  // সেফটি ট্রাই-ক্যাচ ব্লক যাতে কোনো ইনিশিয়ালাইজেশন ফেইল করলেও অ্যাপ ক্র্যাশ না করে
-  try {
-    await AppSettings.i.load();
-  } catch (e) {
-    debugPrint('AppSettings Error: $e');
-  }
+void main() async {
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    
+    try {
+      await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    } catch (e) {
+      debugPrint('Orientation Error: $e');
+    }
+    
+    try {
+      await AppSettings.i.load();
+    } catch (e) {
+      debugPrint('AppSettings Error: $e');
+    }
 
-  try {
-    Sfx.i.init();
-  } catch (e) {
-    debugPrint('Sfx Error: $e');
-  }
+    try {
+      Sfx.i.init();
+    } catch (e) {
+      debugPrint('Sfx Error: $e');
+    }
 
-  try {
-    AdManager.init();
-  } catch (e) {
-    debugPrint('AdManager Error: $e');
-  }
+    try {
+      AdManager.init();
+    } catch (e) {
+      debugPrint('AdManager Error: $e');
+    }
 
-  runApp(const LudoApp());
+    runApp(const LudoApp());
+  }, (error, stack) {
+    debugPrint('Caught unhandled error: $error');
+  });
 }
 
 class LudoApp extends StatelessWidget {
