@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+/// Premium glossy dice. Same API as before (value, accent, size, glow),
+/// so game_screen.dart needs no change.
 class DiceView extends StatelessWidget {
   final int value;
   final Color accent;
@@ -9,30 +11,40 @@ class DiceView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final radius = size * .24;
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Colors.white, Color(0xFFE0E0E0)],
+        borderRadius: BorderRadius.circular(radius),
+        // ivory body with a soft 3D light from the top-left
+        gradient: const RadialGradient(
+          center: Alignment(-.45, -.55),
+          radius: 1.25,
+          colors: [Color(0xFFFFFFFF), Color(0xFFF1F2F8), Color(0xFFC7CCDB)],
+          stops: [0, .55, 1],
         ),
-        borderRadius: BorderRadius.circular(size * .22),
-        border: Border.all(color: accent, width: 3.5),
+        border: Border.all(color: accent, width: size * .05),
         boxShadow: [
-          BoxShadow(color: accent.withOpacity(glow ? .85 : .3), blurRadius: glow ? 20 : 8, spreadRadius: glow ? 2 : 0),
-          const BoxShadow(color: Colors.black54, blurRadius: 6, offset: Offset(0, 4)),
+          BoxShadow(
+            color: accent.withOpacity(glow ? .9 : .35),
+            blurRadius: glow ? size * .45 : size * .16,
+            spreadRadius: glow ? size * .04 : 0,
+          ),
+          BoxShadow(color: Colors.black.withOpacity(.55), blurRadius: size * .12, offset: Offset(0, size * .07)),
         ],
       ),
-      child: CustomPaint(painter: _DotsPainter(value)),
+      child: CustomPaint(painter: _DicePainter(value, accent, radius)),
     );
   }
 }
 
-class _DotsPainter extends CustomPainter {
+class _DicePainter extends CustomPainter {
   final int v;
-  _DotsPainter(this.v);
+  final Color accent;
+  final double radius;
+  _DicePainter(this.v, this.accent, this.radius);
+
   static const _faces = {
     1: [4],
     2: [0, 8],
@@ -44,12 +56,71 @@ class _DotsPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size s) {
+    final w = s.width;
+    final full = Offset.zero & s;
+
+    // glossy highlight on the upper half
+    final gloss = RRect.fromRectAndRadius(
+      Rect.fromLTWH(w * .07, w * .06, w * .86, w * .44),
+      Radius.circular(radius * .8),
+    );
+    canvas.drawRRect(
+      gloss,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Colors.white.withOpacity(.85), Colors.white.withOpacity(0)],
+        ).createShader(gloss.outerRect),
+    );
+
+    // soft inner shade at the bottom edge (gives the cube feel)
+    final shade = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [Colors.transparent, Colors.black.withOpacity(.14)],
+        stops: const [.6, 1],
+      ).createShader(full);
+    canvas.drawRRect(RRect.fromRectAndRadius(full.deflate(w * .03), Radius.circular(radius)), shade);
+
+    // thin bevel line
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(full.deflate(w * .055), Radius.circular(radius * .8)),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = w * .012
+        ..color = Colors.white.withOpacity(.7),
+    );
+
+    // pips
     const f = [.27, .5, .73];
+    final one = v.clamp(1, 6) == 1;
+    final pr = w * (one ? .13 : .09);
     for (final i in _faces[v.clamp(1, 6)]!) {
-      canvas.drawCircle(Offset(s.width * f[i % 3], s.height * f[i ~/ 3]), s.width * .085, Paint()..color = const Color(0xFF212121));
+      final c = Offset(w * f[i % 3], w * f[i ~/ 3]);
+      // drop shadow
+      canvas.drawCircle(c.translate(0, pr * .28), pr, Paint()..color = Colors.black.withOpacity(.28));
+      // pip body, a bit glossy
+      final colors = one
+          ? [Color.lerp(accent, Colors.white, .35)!, accent, Color.lerp(accent, Colors.black, .45)!]
+          : const [Color(0xFF6A6F8F), Color(0xFF1B1840), Color(0xFF0D0B22)];
+      canvas.drawCircle(
+        c,
+        pr,
+        Paint()
+          ..shader = RadialGradient(
+            center: const Alignment(-.35, -.4),
+            radius: 1.0,
+            colors: colors,
+            stops: const [0, .6, 1],
+          ).createShader(Rect.fromCircle(center: c, radius: pr)),
+      );
+      // tiny specular dot
+      canvas.drawCircle(c.translate(-pr * .32, -pr * .34), pr * .2, Paint()..color = Colors.white.withOpacity(.75));
     }
   }
 
   @override
-  bool shouldRepaint(covariant _DotsPainter old) => old.v != v;
+  bool shouldRepaint(covariant _DicePainter old) => old.v != v || old.accent != accent || old.radius != radius;
 }
