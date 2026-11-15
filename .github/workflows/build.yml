@@ -107,10 +107,18 @@ jobs:
           EOF
           
       - name: Run Android patch
+        env:
+          ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID }}
         run: |
-          if [ -f tools/patch_android.py ]; then
-            python3 tools/patch_android.py
-          fi
+          # An unset secret arrives as an empty string, so fall back to Google's test App ID
+          export ADMOB_APP_ID="${ADMOB_APP_ID:-ca-app-pub-3940256099942544~3347511713}"
+          # patch_android.py is in the repo root (fails loudly if missing)
+          python3 patch_android.py
+          # Verify the AdMob ID + internet permission were really added
+          grep -q "ADMOB_PATCHED" android/app/src/main/AndroidManifest.xml
+          grep -q "android.permission.INTERNET" android/app/src/main/AndroidManifest.xml
+          echo "---- Manifest check ----"
+          grep -n "APPLICATION_ID\|INTERNET" android/app/src/main/AndroidManifest.xml
           
       - name: Build APK and AAB
         run: |
