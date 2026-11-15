@@ -22,21 +22,19 @@ jobs:
           channel: 'stable'
           cache: true
           
-      - name: Setup Android project & Install SDK 35
+      - name: Setup Android project & Force SDK 34
         run: |
           if [ ! -d "android" ]; then
             flutter create . --org com.muaz --project-name ludo_royale --platforms=android
           fi
-          # Explicitly install Android SDK 35 and build-tools to fix android.jar error
-          echo "y" | sudo ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0" || true
           
-          # Update compileSdk and targetSdk to 35
-          sed -i 's/compileSdkVersion 34/compileSdkVersion 35/g' android/app/build.gradle || true
-          sed -i 's/targetSdkVersion 34/targetSdkVersion 35/g' android/app/build.gradle || true
-          sed -i 's/compileSdk = 34/compileSdk = 35/g' android/app/build.gradle || true
-          sed -i 's/targetSdk = 34/targetSdk = 35/g' android/app/build.gradle || true
-          sed -i 's/compileSdk 34/compileSdk 35/g' android/app/build.gradle || true
-          sed -i 's/targetSdk 34/targetSdk 35/g' android/app/build.gradle || true
+          # Force compileSdk and targetSdk to 34 in project
+          find android -name "build.gradle" -exec sed -i 's/compileSdkVersion 35/compileSdkVersion 34/g' {} +
+          find android -name "build.gradle" -exec sed -i 's/targetSdkVersion 35/targetSdkVersion 34/g' {} +
+          find android -name "build.gradle" -exec sed -i 's/compileSdk = 35/compileSdk = 34/g' {} +
+          find android -name "build.gradle" -exec sed -i 's/targetSdk = 35/targetSdk = 34/g' {} +
+          find android -name "build.gradle" -exec sed -i 's/compileSdk 35/compileSdk 34/g' {} +
+          find android -name "build.gradle" -exec sed -i 's/targetSdk 35/targetSdk 34/g' {} +
           
           # Update Kotlin version in settings.gradle
           sed -i 's/version "1.[0-9].[0-9]*" apply false/version "1.9.24" apply false/g' android/settings.gradle || true
@@ -78,6 +76,27 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
         
+      - name: Patch plugins for SDK 34
+        run: |
+          python3 << 'EOF'
+          import os
+          pub_cache = os.path.expanduser('~/.pub-cache')
+          for root, dirs, files in os.walk(pub_cache):
+              for file in files:
+                  if file == 'build.gradle':
+                      path = os.path.join(root, file)
+                      try:
+                          with open(path, 'r', encoding='utf-8') as f:
+                              content = f.read()
+                          new_content = content.replace('compileSdkVersion 35', 'compileSdkVersion 34')
+                          new_content = new_content.replace('compileSdk 35', 'compileSdk 34')
+                          if new_content != content:
+                              with open(path, 'w', encoding='utf-8') as f:
+                                  f.write(new_content)
+                      except Exception:
+                          pass
+          EOF
+          
       - name: Run Android patch
         run: |
           if [ -f tools/patch_android.py ]; then
