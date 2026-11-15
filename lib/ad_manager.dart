@@ -6,18 +6,23 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 enum AdResult { notReady, earned, dismissed }
 
 /// ============================================================================
-///  ADMOB CONFIGURATION  -  READ THIS BEFORE PUBLISHING
+///  ADMOB CONFIGURATION
 /// ============================================================================
-///  1. Set [useTestAds] = false  (line marked  <<< STEP 1 >>>)
-///  2. Replace the 6 placeholder IDs under "PRODUCTION IDS" with your real
-///     AdMob ad unit IDs                         (lines marked  <<< STEP 2 >>>)
-///  3. Replace the AdMob APP ID in AndroidManifest.xml. In this repo it is set by
-///     tools/patch_android.py  ->  search for  ADMOB_APP_ID  and change it there
-///     (iOS: Info.plist key GADApplicationIdentifier).     <<< STEP 3 >>>
+///  No code edit is needed to go live. The IDs come from GitHub secrets at build
+///  time (see build.yml). Without them the app safely shows Google TEST ads.
+///
+///  GitHub -> Settings -> Secrets and variables -> Actions:
+///    ADMOB_APP_ID           ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY   (App ID)
+///    ADMOB_PROD             true                                      (turns real ads on)
+///    ADMOB_BANNER_ID        ca-app-pub-XXXXXXXXXXXXXXXX/NNNNNNNNNN
+///    ADMOB_INTERSTITIAL_ID  ca-app-pub-XXXXXXXXXXXXXXXX/NNNNNNNNNN
+///    ADMOB_REWARDED_ID      ca-app-pub-XXXXXXXXXXXXXXXX/NNNNNNNNNN   (optional)
 /// ============================================================================
 class AdManager {
-  // <<< STEP 1 >>>  set to false for release builds
-  static const bool useTestAds = true;
+  static const bool _prod = bool.fromEnvironment('ADMOB_PROD', defaultValue: false);
+  static const String _prodBanner = String.fromEnvironment('ADMOB_BANNER');
+  static const String _prodInter = String.fromEnvironment('ADMOB_INTER');
+  static const String _prodReward = String.fromEnvironment('ADMOB_REWARD');
 
   // ---------------- Official Google TEST ad units ----------------
   static const _testBannerAndroid = 'ca-app-pub-3940256099942544/6300978111';
@@ -27,29 +32,25 @@ class AdManager {
   static const _testRewardAndroid = 'ca-app-pub-3940256099942544/5224354917';
   static const _testRewardIos = 'ca-app-pub-3940256099942544/1712485313';
 
-  // ---------------- PRODUCTION IDS (replace!) ----------------
-  static const _prodBannerAndroid = 'ca-app-pub-XXXXXXXXXXXXXXXX/1111111111'; // <<< STEP 2 >>>
-  static const _prodBannerIos = 'ca-app-pub-XXXXXXXXXXXXXXXX/2222222222'; // <<< STEP 2 >>>
-  static const _prodInterAndroid = 'ca-app-pub-XXXXXXXXXXXXXXXX/3333333333'; // <<< STEP 2 >>>
-  static const _prodInterIos = 'ca-app-pub-XXXXXXXXXXXXXXXX/4444444444'; // <<< STEP 2 >>>
-  static const _prodRewardAndroid = 'ca-app-pub-XXXXXXXXXXXXXXXX/5555555555'; // <<< STEP 2 >>>
-  static const _prodRewardIos = 'ca-app-pub-XXXXXXXXXXXXXXXX/6666666666'; // <<< STEP 2 >>>
-
   static bool get _android => Platform.isAndroid;
 
-  static String get bannerId => useTestAds
-      ? (_android ? _testBannerAndroid : _testBannerIos)
-      : (_android ? _prodBannerAndroid : _prodBannerIos);
-  static String get interstitialId => useTestAds
-      ? (_android ? _testInterAndroid : _testInterIos)
-      : (_android ? _prodInterAndroid : _prodInterIos);
-  static String get rewardedId => useTestAds
-      ? (_android ? _testRewardAndroid : _testRewardIos)
-      : (_android ? _prodRewardAndroid : _prodRewardIos);
+  /// true while Google test ads are used (no secrets set yet).
+  static bool get useTestAds => !(_prod && _android);
+
+  static String _pick(String prodId, String testAndroid, String testIos) {
+    if (useTestAds || prodId.isEmpty) return _android ? testAndroid : testIos;
+    return prodId;
+  }
+
+  static String get bannerId => _pick(_prodBanner, _testBannerAndroid, _testBannerIos);
+  static String get interstitialId => _pick(_prodInter, _testInterAndroid, _testInterIos);
+  static String get rewardedId => _pick(_prodReward, _testRewardAndroid, _testRewardIos);
 
   static InterstitialAd? _inter;
   static RewardedAd? _rewarded;
   static bool _started = false;
+  static int _interTries = 0;
+  static int _rewardTries = 0;
 
   static Future<void> init() async {
     try {
@@ -63,25 +64,38 @@ class AdManager {
   }
 
   static void _loadInterstitial() {
-    if (!_started) return;
+    if (!_started || _inter != null) return;
     InterstitialAd.load(
       adUnitId: interstitialId,
       request: const AdRequest(),
       adLoadCallback: InterstitialAdLoadCallback(
-        onAdLoaded: (ad) => _inter = ad,
-        onAdFailedToLoad: (e) => _inter = null,
+        onAdLoaded: (ad) {
+          _inter = ad;
+          _interTries = 0;
+        },
+        onAdFailedToLoad: (e) {
+          _inter = null;
+          // retry with growing delay (30s, 60s, 90s ... max 5 tries)
+          if (++_interTries <= 5) Future.delayed(Duration(seconds: 30 * _interTries), _loadInterstitial);
+        },
       ),
     );
   }
 
   static void _loadRewarded() {
-    if (!_started) return;
+    if (!_started || _rewarded != null) return;
     RewardedAd.load(
       adUnitId: rewardedId,
       request: const AdRequest(),
       rewardedAdLoadCallback: RewardedAdLoadCallback(
-        onAdLoaded: (ad) => _rewarded = ad,
-        onAdFailedToLoad: (e) => _rewarded = null,
+        onAdLoaded: (ad) {
+          _rewarded = ad;
+          _rewardTries = 0;
+        },
+        onAdFailedToLoad: (e) {
+          _rewarded = null;
+          if (++_rewardTries <= 5) Future.delayed(Duration(seconds: 30 * _rewardTries), _loadRewarded);
+        },
       ),
     );
   }
@@ -139,6 +153,7 @@ class AdManager {
 }
 
 /// Banner anchored at the bottom of a screen. Reserves its height so the layout never jumps.
+/// Retries automatically if the first load fails (better fill rate = more income).
 class BannerAdWidget extends StatefulWidget {
   const BannerAdWidget({super.key});
   @override
@@ -148,25 +163,43 @@ class BannerAdWidget extends StatefulWidget {
 class _BannerAdWidgetState extends State<BannerAdWidget> {
   BannerAd? _ad;
   bool _loaded = false;
+  int _tries = 0;
+  Timer? _retry;
 
   @override
   void initState() {
     super.initState();
+    _load();
+  }
+
+  void _load() {
+    _ad?.dispose();
+    _loaded = false;
     _ad = BannerAd(
       adUnitId: AdManager.bannerId,
       size: AdSize.banner,
       request: const AdRequest(),
       listener: BannerAdListener(
         onAdLoaded: (_) {
+          _tries = 0;
           if (mounted) setState(() => _loaded = true);
         },
-        onAdFailedToLoad: (ad, e) => ad.dispose(),
+        onAdFailedToLoad: (ad, e) {
+          ad.dispose();
+          _ad = null;
+          if (mounted && ++_tries <= 5) {
+            _retry = Timer(Duration(seconds: 20 * _tries), () {
+              if (mounted) _load();
+            });
+          }
+        },
       ),
     )..load();
   }
 
   @override
   void dispose() {
+    _retry?.cancel();
     _ad?.dispose();
     super.dispose();
   }
