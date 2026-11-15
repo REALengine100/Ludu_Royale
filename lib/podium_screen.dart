@@ -8,15 +8,16 @@ import 'menu_screen.dart';
 class PodiumScreen extends StatefulWidget {
   final GameConfig config;
   final List<int> ranking; // colours, 1st first
+
   const PodiumScreen({super.key, required this.config, required this.ranking});
+
   @override
   State<PodiumScreen> createState() => _PodiumScreenState();
 }
 
 class _PodiumScreenState extends State<PodiumScreen> with SingleTickerProviderStateMixin {
   final ConfettiController _conf = ConfettiController(duration: const Duration(seconds: 6));
-  late final AnimationController _rise =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..forward();
+  late final AnimationController _rise = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..forward();
 
   @override
   void initState() {
@@ -53,7 +54,12 @@ class _PodiumScreenState extends State<PodiumScreen> with SingleTickerProviderSt
                 child: Icon(_bot(color) ? Icons.smart_toy_rounded : Icons.person_rounded, color: Colors.white, size: rank == 0 ? 32 : 26),
               ),
               const SizedBox(height: 6),
-              Text(_name(color), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white)),
+              Text(
+                _name(color),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white),
+              ),
               const SizedBox(height: 6),
               Container(
                 height: height * t,
@@ -62,7 +68,11 @@ class _PodiumScreenState extends State<PodiumScreen> with SingleTickerProviderSt
                 padding: const EdgeInsets.only(top: 8),
                 decoration: BoxDecoration(
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-                  gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [kPlayerColors[color], darken(kPlayerColors[color], .2)]),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [kPlayerColors[color], darken(kPlayerColors[color], .2)],
+                  ),
                 ),
                 child: Text(ordinal(rank + 1), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white)),
               ),
@@ -78,7 +88,11 @@ class _PodiumScreenState extends State<PodiumScreen> with SingleTickerProviderSt
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
-          gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF2B1B6B), Color(0xFF110C2B)]),
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFF2B1B6B), Color(0xFF110C2B)],
+          ),
         ),
         child: SafeArea(
           child: Stack(
@@ -145,5 +159,42 @@ class _PodiumScreenState extends State<PodiumScreen> with SingleTickerProviderSt
         ),
       ),
     );
+  }
+}
+
+// --- Added Missing Constants and Helpers ---
+
+const List<Color> kPlayerColors = [
+  Colors.red,
+  Colors.green,
+  Colors.yellow,
+  Colors.blue,
+];
+
+extension ColorUtils on Color {
+  Color darken([double amount = .1]) {
+    assert(amount >= 0 && amount <= 1);
+    final hsl = HSLColor.fromColor(this);
+    final darkenedHSL = hsl.withLightness((hsl.lightness - amount).clamp(0.0, 1.0));
+    return darkenedHSL.toColor();
+  }
+}
+
+String ordinal(int number) {
+  if (!(number >= 1 && number <= 100)) {
+    return number.toString();
+  }
+  if (number >= 11 && number <= 13) {
+    return '${number}th';
+  }
+  switch (number % 10) {
+    case 1:
+      return '${number}st';
+    case 2:
+      return '${number}nd';
+    case 3:
+      return '${number}rd';
+    default:
+      return '${number}th';
   }
 }
