@@ -23,7 +23,7 @@ jobs:
           cache: true
           
       - name: Generate Android project files
-        run: flutter create . --org com.muaz.luduroyale --platforms=android
+        run: flutter create . --org com.muaz --project-name ludo_royale --platforms=android
           
       - name: Install dependencies
         run: flutter pub get
