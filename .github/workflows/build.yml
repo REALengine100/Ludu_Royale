@@ -35,6 +35,23 @@ jobs:
           # Update Kotlin version in settings.gradle
           sed -i 's/version "1.[0-9].[0-9]*" apply false/version "1.9.24" apply false/g' android/settings.gradle || true
           
+      - name: Auto-organize files into screens and services
+        run: |
+          mkdir -p lib/screens lib/services
+          [ -f lib/splash_screen.dart ] && mv lib/splash_screen.dart lib/screens/ || true
+          [ -f lib/menu_screen.dart ] && mv lib/menu_screen.dart lib/screens/ || true
+          [ -f lib/game_screen.dart ] && mv lib/game_screen.dart lib/screens/ || true
+          [ -f lib/podium_screen.dart ] && mv lib/podium_screen.dart lib/screens/ || true
+          [ -f lib/dialogs.dart ] && mv lib/dialogs.dart lib/screens/ || true
+          [ -f lib/dice_view.dart ] && mv lib/dice_view.dart lib/screens/ || true
+          [ -f lib/board_painter.dart ] && mv lib/board_painter.dart lib/screens/ || true
+          [ -f lib/ad_manager.dart ] && mv lib/ad_manager.dart lib/services/ || true
+          [ -f lib/app_settings.dart ] && mv lib/app_settings.dart lib/services/ || true
+          [ -f lib/sfx.dart ] && mv lib/sfx.dart lib/services/ || true
+          [ -f lib/ai.dart ] && mv lib/ai.dart lib/services/ || true
+          [ -f lib/ludo_engine.dart ] && mv lib/ludo_engine.dart lib/services/ || true
+          [ -f lib/models.dart ] && mv lib/models.dart lib/services/ || true
+          
       - name: Install dependencies
         run: flutter pub get
         
