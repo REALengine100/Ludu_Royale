@@ -48,6 +48,11 @@ jobs:
           # Clean up adaptive xml files if any exist to prevent override
           rm -f android/app/src/main/res/mipmap-anydpi-v26/*.xml || true
           
+      - name: Generate Ludo launcher icon
+        run: |
+          pip install pillow
+          python3 make_icon.py
+
       - name: Flatten files and fix imports cleanly
         run: |
           python3 << 'EOF'
@@ -121,9 +126,15 @@ jobs:
           grep -n "APPLICATION_ID\|INTERNET" android/app/src/main/AndroidManifest.xml
           
       - name: Build APK and AAB
+        env:
+          ADMOB_PROD: ${{ secrets.ADMOB_PROD }}
+          ADMOB_BANNER_ID: ${{ secrets.ADMOB_BANNER_ID }}
+          ADMOB_INTERSTITIAL_ID: ${{ secrets.ADMOB_INTERSTITIAL_ID }}
+          ADMOB_REWARDED_ID: ${{ secrets.ADMOB_REWARDED_ID }}
         run: |
-          flutter build apk --release
-          flutter build appbundle --release
+          DEFS="--dart-define=ADMOB_PROD=${ADMOB_PROD:-false} --dart-define=ADMOB_BANNER=${ADMOB_BANNER_ID} --dart-define=ADMOB_INTER=${ADMOB_INTERSTITIAL_ID} --dart-define=ADMOB_REWARD=${ADMOB_REWARDED_ID}"
+          flutter build apk --release $DEFS
+          flutter build appbundle --release $DEFS
           
       - name: Upload APK
         uses: actions/upload-artifact@v4
