@@ -142,6 +142,7 @@ class BoardPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
+/// Premium 3D pawn (head + collar + body + base). Same API as the old round token.
 class TokenView extends StatelessWidget {
   final Color color;
   final double glow; // 0..1 pulsing highlight (0 = none)
@@ -150,30 +151,115 @@ class TokenView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: RadialGradient(
-          center: const Alignment(-.3, -.35),
-          colors: [lighten(color, .28), color, darken(color, .15)],
-          stops: const [0, .55, 1],
-        ),
-        border: Border.all(color: Colors.white, width: highlighted ? 2.5 : 1.8),
-        boxShadow: [
-          BoxShadow(color: Colors.black45, blurRadius: 4, offset: const Offset(0, 2)),
-          if (highlighted)
-            BoxShadow(color: Colors.white.withOpacity(.5 + .5 * glow), blurRadius: 6 + 8 * glow, spreadRadius: 1 + 2 * glow),
-        ],
-      ),
-      child: Center(
-        child: FractionallySizedBox(
-          widthFactor: .38,
-          heightFactor: .38,
-          child: DecoratedBox(
-            decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withOpacity(.35)),
-          ),
-        ),
-      ),
+    return SizedBox.expand(
+      child: CustomPaint(painter: _PawnPainter(color, highlighted, glow)),
     );
   }
+}
+
+class _PawnPainter extends CustomPainter {
+  final Color color;
+  final bool highlighted;
+  final double glow;
+  _PawnPainter(this.color, this.highlighted, this.glow);
+
+  @override
+  void paint(Canvas canvas, Size s) {
+    final w = s.width, h = s.height;
+
+    // soft ground shadow
+    canvas.drawOval(
+      Rect.fromLTWH(w * .14, h * .80, w * .72, h * .16),
+      Paint()
+        ..color = Colors.black.withOpacity(.38)
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, w * .04),
+    );
+
+    // glowing ring under a movable pawn
+    if (highlighted) {
+      canvas.drawOval(
+        Rect.fromLTWH(w * .06, h * .72, w * .88, h * .26),
+        Paint()
+          ..color = Colors.white.withOpacity(.55 + .45 * glow)
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, w * (.07 + .05 * glow)),
+      );
+    }
+
+    final light = lighten(color, .32);
+    final dark = darken(color, .22);
+    final outline = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * (highlighted ? .075 : .055)
+      ..strokeJoin = StrokeJoin.round;
+
+    // base disc
+    final baseRect = Rect.fromLTWH(w * .15, h * .70, w * .70, h * .22);
+    canvas.drawOval(baseRect, outline);
+    canvas.drawOval(
+      baseRect,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [light, color, dark],
+        ).createShader(baseRect),
+    );
+
+    // body (cone with concave sides)
+    final body = Path()
+      ..moveTo(w * .22, h * .80)
+      ..quadraticBezierTo(w * .44, h * .70, w * .42, h * .46)
+      ..lineTo(w * .58, h * .46)
+      ..quadraticBezierTo(w * .56, h * .70, w * .78, h * .80)
+      ..quadraticBezierTo(w * .50, h * .87, w * .22, h * .80)
+      ..close();
+    canvas.drawPath(body, outline);
+    canvas.drawPath(
+      body,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: [light, color, dark],
+          stops: const [0, .45, 1],
+        ).createShader(Rect.fromLTWH(w * .2, h * .46, w * .6, h * .4)),
+    );
+
+    // collar
+    final collar = Rect.fromLTWH(w * .33, h * .40, w * .34, h * .11);
+    canvas.drawOval(collar, outline);
+    canvas.drawOval(
+      collar,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [lighten(color, .45), color],
+        ).createShader(collar),
+    );
+
+    // head
+    final headC = Offset(w * .5, h * .29);
+    final headR = w * .205;
+    canvas.drawCircle(headC, headR, outline);
+    canvas.drawCircle(
+      headC,
+      headR,
+      Paint()
+        ..shader = RadialGradient(
+          center: const Alignment(-.4, -.45),
+          radius: 1.0,
+          colors: [lighten(color, .55), color, dark],
+          stops: const [0, .55, 1],
+        ).createShader(Rect.fromCircle(center: headC, radius: headR)),
+    );
+
+    // specular highlight on the head
+    canvas.drawCircle(Offset(w * .43, h * .22), w * .055, Paint()..color = Colors.white.withOpacity(.8));
+  }
+
+  @override
+  bool shouldRepaint(covariant _PawnPainter old) =>
+      old.color != color || old.highlighted != highlighted || old.glow != glow;
 }
