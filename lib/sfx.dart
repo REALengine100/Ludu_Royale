@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
@@ -39,6 +40,14 @@ class _Wave {
 
   Uint8List wav() {
     final n = s.length;
+
+    // normalise so every effect is clearly audible (peak ~0.9)
+    double peak = 0;
+    for (final v in s) {
+      if (v.abs() > peak) peak = v.abs();
+    }
+    final gain = peak > 0 ? .9 / peak : 1.0;
+
     final b = ByteData(44 + n * 2);
     void str(int o, String t) {
       for (int i = 0; i < t.length; i++) {
@@ -60,7 +69,7 @@ class _Wave {
     str(36, 'data');
     b.setUint32(40, n * 2, Endian.little);
     for (int i = 0; i < n; i++) {
-      b.setInt16(44 + i * 2, (s[i].clamp(-1.0, 1.0) * 32767).toInt(), Endian.little);
+      b.setInt16(44 + i * 2, ((s[i] * gain).clamp(-1.0, 1.0) * 32767).toInt(), Endian.little);
     }
     return b.buffer.asUint8List();
   }
@@ -71,13 +80,18 @@ class Sfx {
   Sfx._();
 
   final Map<String, Uint8List> _bank = {};
+  final Map<String, String> _paths = {};
   final List<AudioPlayer> _pool = [];
   int _n = 0;
   bool _ready = false;
+  Future<void>? _initFuture;
 
-  void init() {
+  /// Safe to call many times (and play() calls it automatically if main.dart never did).
+  Future<void> init() => _initFuture ??= _init();
+
+  Future<void> _init() async {
     try {
-      AudioPlayer.global.setAudioContext(AudioContextConfig(focus: AudioContextConfigFocus.mixWithOthers).build());
+      await AudioPlayer.global.setAudioContext(AudioContextConfig(focus: AudioContextConfigFocus.mixWithOthers).build());
     } catch (_) {}
 
     // Dice rattle: a burst of clicks + low thud
@@ -114,18 +128,40 @@ class Sfx {
     final pop = _Wave()..tone(660, .09, vol: .4, f2: 990, decay: 4);
     _bank['pop'] = pop.wav();
 
-    _pool.addAll(List.generate(5, (_) => AudioPlayer()));
+    // Write each effect to a real WAV file in the app's cache dir.
+    // (BytesSource is unreliable on many Android phones - files always work.)
+    try {
+      final dir = Directory.systemTemp;
+      for (final e in _bank.entries) {
+        final f = File('${dir.path}/ludo_sfx_${e.key}.wav');
+        await f.writeAsBytes(e.value, flush: true);
+        _paths[e.key] = f.path;
+      }
+    } catch (_) {}
+
+    for (int k = 0; k < 5; k++) {
+      final p = AudioPlayer();
+      try {
+        await p.setReleaseMode(ReleaseMode.stop);
+        await p.setVolume(1.0);
+      } catch (_) {}
+      _pool.add(p);
+    }
     _ready = true;
   }
 
   Future<void> play(String key) async {
-    if (!AppSettings.i.sound || !_ready) return;
-    final bytes = _bank[key];
-    if (bytes == null) return;
+    if (!AppSettings.i.sound) return;
+    if (!_ready) {
+      await init();
+      if (!_ready) return;
+    }
+    final path = _paths[key];
+    if (path == null) return;
     final p = _pool[_n++ % _pool.length];
     try {
       await p.stop();
-      await p.play(BytesSource(bytes));
+      await p.play(DeviceFileSource(path), volume: 1.0);
     } catch (_) {}
   }
 }
