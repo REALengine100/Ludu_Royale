@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../engine/ai.dart';
 import '../engine/ludo_engine.dart';
 import '../models.dart';
@@ -38,14 +39,13 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   final Random rng = Random();
 
   bool busy = false; // dice rolling / token animating
-  bool paused = false; // a rewarded ad is on screen
+  bool paused = false; // an ad is on screen
   bool over = false;
   List<int> movable = [];
-  int face = 1;
+  int face = 1; // face shown on the CURRENT player's dice while rolling
+  final Map<int, int> faces = {}; // last rolled face of every player
   String status = '';
   String? banner;
-  LudoEngine? undoSnap;
-  final Set<int> rerollUsed = {};
   final Map<int, String> bubbles = {};
   Timer? faceTimer, bannerTimer;
 
@@ -53,13 +53,13 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   PlayerCfg playerOf(int color) => cfg.players.firstWhere((p) => p.color == color);
   bool isBot(int color) => playerOf(color).bot;
 
-  List<List<int>> _copyPos() => engine.pos.map((e) => List<int>.from(e)).toList();
-
   @override
   void initState() {
     super.initState();
+    // Full screen (hide status bar + navigation bar) while the game is on
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     engine = LudoEngine(cfg.players.map((p) => p.color).toList());
-    disp = _copyPos();
+    disp = engine.pos.map((e) => List<int>.from(e)).toList();
     timerCtl = AnimationController(vsync: this, duration: const Duration(seconds: _turnSeconds))
       ..addStatusListener((s) {
         if (s == AnimationStatus.completed) _onTimeout();
@@ -71,6 +71,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     faceTimer?.cancel();
     bannerTimer?.cancel();
     timerCtl.dispose();
@@ -88,7 +89,8 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
       return;
     }
     movable = [];
-    status = "${playerOf(engine.current).name}'s turn";
+    final name = playerOf(engine.current).name;
+    status = isBot(engine.current) ? "$name's turn" : "$name's turn - tap your dice";
     timerCtl.forward(from: 0);
     setState(() {});
     if (isBot(engine.current)) _scheduleBot();
@@ -123,7 +125,6 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   Future<void> _doRoll() async {
     if (busy || paused || over || engine.phase != Phase.roll) return;
     busy = true;
-    undoSnap = null;
     movable = [];
     final who = engine.current;
     status = '${playerOf(who).name} is rolling...';
@@ -141,6 +142,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
     final out = engine.roll();
     face = engine.dice;
+    faces[who] = face;
     Haptics.light();
     if (out == RollOutcome.forfeit) {
       status = 'Three 6s in a row - turn forfeited!';
@@ -181,11 +183,9 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     if (busy || over || engine.phase != Phase.move || !movable.contains(t)) return;
     busy = true;
     final c = engine.current;
-    final snap = engine.clone();
     final before = engine.ranking.length;
     movable = [];
     final res = engine.move(t);
-    undoSnap = isBot(c) ? null : snap;
     setState(() {});
 
     for (final p in res.path) {
@@ -239,63 +239,6 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => PodiumScreen(config: cfg, ranking: List<int>.from(engine.ranking))),
     );
-  }
-
-  // ---------------------------------------------------------------- power-ups (rewarded ads)
-
-  bool get canReroll =>
-      !over && !busy && !paused && engine.phase == Phase.move && !isBot(engine.current) && !rerollUsed.contains(engine.current);
-
-  bool get canUndo => !over && !busy && !paused && undoSnap != null && engine.phase == Phase.roll;
-
-  void _toast(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(msg), duration: const Duration(milliseconds: 1600)));
-  }
-
-  Future<void> _reroll() async {
-    if (!canReroll) return;
-    final who = engine.current;
-    paused = true;
-    final r = await AdManager.showRewarded();
-    paused = false;
-    if (!mounted) return;
-    if (r == AdResult.notReady) {
-      _toast('Ad not ready yet - try again in a moment');
-      return;
-    }
-    if (r == AdResult.earned && engine.current == who && engine.phase == Phase.move && !over) {
-      rerollUsed.add(who);
-      engine.resetRoll();
-      movable = [];
-      status = 'Re-rolling...';
-      setState(() {});
-      _doRoll();
-    }
-  }
-
-  Future<void> _undo() async {
-    if (!canUndo) return;
-    paused = true;
-    final r = await AdManager.showRewarded();
-    paused = false;
-    if (!mounted) return;
-    if (r == AdResult.notReady) {
-      _toast('Ad not ready yet - try again in a moment');
-      return;
-    }
-    if (r == AdResult.earned && undoSnap != null && !over) {
-      engine = undoSnap!;
-      undoSnap = null;
-      disp = _copyPos();
-      face = engine.dice;
-      movable = engine.legalMoves();
-      status = 'Move undone - choose again';
-      setState(() {});
-      timerCtl.forward(from: 0);
-    }
   }
 
   // ---------------------------------------------------------------- UI helpers
@@ -435,8 +378,44 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     return Row(
       children: [
         for (final c in colors)
-          Expanded(child: cfg.players.any((p) => p.color == c) ? _card(c) : const SizedBox(height: 62)),
+          Expanded(child: cfg.players.any((p) => p.color == c) ? _card(c) : const SizedBox(height: 72)),
       ],
+    );
+  }
+
+  /// The dice that sits beside each player's home/card.
+  Widget _playerDice(int color) {
+    final isCur = engine.current == color && !over && !engine.ranking.contains(color);
+    final canRoll = isCur && !isBot(color) && engine.phase == Phase.roll && !busy && !paused;
+    final value = isCur ? face : (faces[color] ?? 1);
+    final accent = kPlayerColors[color];
+
+    Widget dice = DiceView(value: value, accent: accent, size: 46, glow: canRoll && pulseCtl.value > .4);
+    if (isCur) {
+      dice = AnimatedBuilder(
+        animation: diceCtl,
+        builder: (_, child) {
+          final t = diceCtl.value;
+          final m = Matrix4.identity()
+            ..setEntry(3, 2, .0015)
+            ..rotateX(sin(t * pi * 4) * (1 - t) * 1.3)
+            ..rotateY(sin(t * pi * 3) * (1 - t) * 1.5)
+            ..rotateZ(sin(t * pi * 5) * (1 - t) * .5);
+          return Transform.translate(
+            offset: Offset(0, -sin(t * pi) * 8),
+            child: Transform(alignment: Alignment.center, transform: m, child: child),
+          );
+        },
+        child: dice,
+      );
+    }
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: canRoll ? _doRoll : null,
+      child: Padding(
+        padding: const EdgeInsets.all(2),
+        child: Opacity(opacity: isCur ? 1 : .55, child: dice),
+      ),
     );
   }
 
@@ -449,9 +428,9 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     return AnimatedBuilder(
       animation: pulseCtl,
       builder: (_, __) => Container(
-        height: 56,
-        margin: const EdgeInsets.fromLTRB(8, 4, 8, 4),
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+        height: 64,
+        margin: const EdgeInsets.fromLTRB(6, 4, 6, 4),
+        padding: const EdgeInsets.symmetric(horizontal: 6),
         decoration: BoxDecoration(
           color: const Color(0xFF241B4B),
           borderRadius: BorderRadius.circular(14),
@@ -460,25 +439,26 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         ),
         child: Row(
           children: [
-            CircleAvatar(radius: 17, backgroundColor: col, child: Icon(pc.bot ? Icons.smart_toy_rounded : Icons.person_rounded, size: 20, color: Colors.white)),
-            const SizedBox(width: 8),
+            CircleAvatar(radius: 15, backgroundColor: col, child: Icon(pc.bot ? Icons.smart_toy_rounded : Icons.person_rounded, size: 18, color: Colors.white)),
+            const SizedBox(width: 6),
             Expanded(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(pc.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                  Text('🏠 $home/4', style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                  Text(pc.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                  Text(rank >= 0 ? '#${rank + 1}  🏠 $home/4' : '🏠 $home/4', style: TextStyle(fontSize: 11, color: rank >= 0 ? Colors.amber : Colors.white70)),
                 ],
               ),
             ),
             if (bubbles[color] != null)
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                margin: const EdgeInsets.only(right: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                 decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                child: Text(bubbles[color]!, style: const TextStyle(fontSize: 22)),
+                child: Text(bubbles[color]!, style: const TextStyle(fontSize: 18)),
               ),
-            if (rank >= 0) Text('#${rank + 1}', style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.amber)),
+            _playerDice(color),
           ],
         ),
       ),
@@ -592,64 +572,17 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     return [...normal, ...hi];
   }
 
+  /// Bottom bar: status text + chat button (dice, Re-roll and Undo are gone).
   Widget _controls() {
-    final cur = engine.current;
-    final human = !isBot(cur);
-    final canRoll = human && engine.phase == Phase.roll && !busy && !over && !paused;
-    final accent = kPlayerColors[cur];
     return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
-      child: Column(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      child: Row(
         children: [
-          SizedBox(
-            height: 20,
+          Expanded(
             child: Text(status, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70, fontSize: 13)),
           ),
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  children: [
-                    _pill(Icons.emoji_emotions_rounded, 'Chat', true, _openEmoji),
-                    const SizedBox(height: 6),
-                    _pill(Icons.undo_rounded, 'Undo 🎬', canUndo, _undo),
-                  ],
-                ),
-              ),
-              GestureDetector(
-                onTap: canRoll ? _doRoll : null,
-                child: AnimatedBuilder(
-                  animation: diceCtl,
-                  builder: (_, child) {
-                    final t = diceCtl.value;
-                    final m = Matrix4.identity()
-                      ..setEntry(3, 2, .0015)
-                      ..rotateX(sin(t * pi * 4) * (1 - t) * 1.3)
-                      ..rotateY(sin(t * pi * 3) * (1 - t) * 1.5)
-                      ..rotateZ(sin(t * pi * 5) * (1 - t) * .5);
-                    return Transform.translate(
-                      offset: Offset(0, -sin(t * pi) * 16),
-                      child: Transform(alignment: Alignment.center, transform: m, child: child),
-                    );
-                  },
-                  child: AnimatedBuilder(
-                    animation: pulseCtl,
-                    builder: (_, __) => DiceView(value: face, accent: accent, size: 76, glow: canRoll && pulseCtl.value > .4),
-                  ),
-                ),
-              ),
-              Expanded(
-                child: Column(
-                  children: [
-                    _pill(Icons.casino_rounded, rerollUsed.contains(cur) ? 'Re-roll used' : 'Re-roll 🎬', canReroll, _reroll),
-                    const SizedBox(height: 6),
-                    Text(canRoll ? 'TAP DICE' : '', style: TextStyle(color: accent, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 1)),
-                  ],
-                ),
-              ),
-            ],
-          ),
+          const SizedBox(width: 8),
+          _pill(Icons.emoji_emotions_rounded, 'Chat', true, _openEmoji),
         ],
       ),
     );
