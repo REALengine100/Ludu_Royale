@@ -22,9 +22,14 @@ jobs:
           channel: 'stable'
           cache: true
           
-      - name: Generate Android project files
+      - name: Setup Android project & Install SDK 35
         run: |
-          flutter create . --org com.muaz --project-name ludo_royale --platforms=android
+          if [ ! -d "android" ]; then
+            flutter create . --org com.muaz --project-name ludo_royale --platforms=android
+          fi
+          # Explicitly install Android SDK 35 and build-tools to fix android.jar error
+          echo "y" | sudo ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0" || true
+          
           # Update compileSdk and targetSdk to 35
           sed -i 's/compileSdkVersion 34/compileSdkVersion 35/g' android/app/build.gradle || true
           sed -i 's/targetSdkVersion 34/targetSdkVersion 35/g' android/app/build.gradle || true
@@ -32,6 +37,7 @@ jobs:
           sed -i 's/targetSdk = 34/targetSdk = 35/g' android/app/build.gradle || true
           sed -i 's/compileSdk 34/compileSdk 35/g' android/app/build.gradle || true
           sed -i 's/targetSdk 34/targetSdk 35/g' android/app/build.gradle || true
+          
           # Update Kotlin version in settings.gradle
           sed -i 's/version "1.[0-9].[0-9]*" apply false/version "1.9.24" apply false/g' android/settings.gradle || true
           
@@ -39,33 +45,34 @@ jobs:
         run: |
           python3 << 'EOF'
           import os, glob, re, shutil
-          os.chdir('lib')
-          for root, dirs, files in os.walk('.'):
-              if root == '.':
-                  continue
-              for file in files:
-                  if file.endswith('.dart'):
-                      src = os.path.join(root, file)
-                      dst = file
-                      if not os.path.exists(dst):
-                          os.rename(src, dst)
-          for d in ['screens', 'services']:
-              if os.path.exists(d):
-                  shutil.rmtree(d)
-          
-          for fn in glob.glob('*.dart'):
-              with open(fn, 'r', encoding='utf-8') as f:
-                  content = f.read()
-              def fix_import(match):
-                  quote = match.group(1)
-                  path = match.group(2)
-                  if path.startswith('package:'):
-                      return f'import {quote}{path}{quote}'
-                  filename = os.path.basename(path)
-                  return f'import {quote}{filename}{quote}'
-              content = re.sub(r"import\s+(['\"])(.*?)(['\"])", fix_import, content)
-              with open(fn, 'w', encoding='utf-8') as f:
-                  f.write(content)
+          if os.path.exists('lib'):
+              os.chdir('lib')
+              for root, dirs, files in os.walk('.'):
+                  if root == '.':
+                      continue
+                  for file in files:
+                      if file.endswith('.dart'):
+                          src = os.path.join(root, file)
+                          dst = file
+                          if not os.path.exists(dst):
+                              os.rename(src, dst)
+              for d in ['screens', 'services']:
+                  if os.path.exists(d):
+                      shutil.rmtree(d)
+              
+              for fn in glob.glob('*.dart'):
+                  with open(fn, 'r', encoding='utf-8') as f:
+                      content = f.read()
+                  def fix_import(match):
+                      quote = match.group(1)
+                      path = match.group(2)
+                      if path.startswith('package:'):
+                          return f'import {quote}{path}{quote}'
+                      filename = os.path.basename(path)
+                      return f'import {quote}{filename}{quote}'
+                  content = re.sub(r"import\s+(['\"])(.*?)(['\"])", fix_import, content)
+                  with open(fn, 'w', encoding='utf-8') as f:
+                      f.write(content)
           EOF
           
       - name: Install dependencies
