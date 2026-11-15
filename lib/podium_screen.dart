@@ -1,7 +1,7 @@
 import 'package:confetti/confetti.dart';
 import 'package:flutter/material.dart';
-import '../models.dart';
-import '../services/sfx.dart';
+import 'models.dart';
+import 'sfx.dart';
 import 'game_screen.dart';
 import 'menu_screen.dart';
 
@@ -159,42 +159,5 @@ class _PodiumScreenState extends State<PodiumScreen> with SingleTickerProviderSt
         ),
       ),
     );
-  }
-}
-
-// --- Added Missing Constants and Helpers ---
-
-const List<Color> kPlayerColors = [
-  Colors.red,
-  Colors.green,
-  Colors.yellow,
-  Colors.blue,
-];
-
-extension ColorUtils on Color {
-  Color darken([double amount = .1]) {
-    assert(amount >= 0 && amount <= 1);
-    final hsl = HSLColor.fromColor(this);
-    final darkenedHSL = hsl.withLightness((hsl.lightness - amount).clamp(0.0, 1.0));
-    return darkenedHSL.toColor();
-  }
-}
-
-String ordinal(int number) {
-  if (!(number >= 1 && number <= 100)) {
-    return number.toString();
-  }
-  if (number >= 11 && number <= 13) {
-    return '${number}th';
-  }
-  switch (number % 10) {
-    case 1:
-      return '${number}st';
-    case 2:
-      return '${number}nd';
-    case 3:
-      return '${number}rd';
-    default:
-      return '${number}th';
   }
 }
