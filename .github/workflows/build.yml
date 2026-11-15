@@ -35,9 +35,9 @@ jobs:
           # Update Kotlin version in settings.gradle
           sed -i 's/version "1.[0-9].[0-9]*" apply false/version "1.9.24" apply false/g' android/settings.gradle || true
           
-      - name: Flatten files and fix imports automatically
+      - name: Flatten files and fix imports cleanly
         run: |
-          python3 -c "
+          python3 << 'EOF'
           import os, glob, re, shutil
           os.chdir('lib')
           for root, dirs, files in os.walk('.'):
@@ -63,10 +63,10 @@ jobs:
                       return f'import {quote}{path}{quote}'
                   filename = os.path.basename(path)
                   return f'import {quote}{filename}{quote}'
-              content = re.sub(r\"import\s+(['\"])(.*?)(['\"])\", fix_import, content)
+              content = re.sub(r"import\s+(['\"])(.*?)(['\"])", fix_import, content)
               with open(fn, 'w', encoding='utf-8') as f:
                   f.write(content)
-          "
+          EOF
           
       - name: Install dependencies
         run: flutter pub get
