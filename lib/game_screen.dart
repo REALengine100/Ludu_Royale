@@ -5,12 +5,12 @@ import 'package:flutter/services.dart';
 import '../engine/ai.dart';
 import '../engine/ludo_engine.dart';
 import '../models.dart';
-import '../services/ad_manager.dart';
 import '../services/app_settings.dart';
 import '../services/sfx.dart';
 import '../widgets/board_painter.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/dice_view.dart';
+import 'menu_screen.dart' show FancyButton;
 import 'podium_screen.dart';
 
 class _Tk {
@@ -27,19 +27,16 @@ class GameScreen extends StatefulWidget {
   State<GameScreen> createState() => _GameScreenState();
 }
 
-class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
-  static const _turnSeconds = 15;
+class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, WidgetsBindingObserver {
   static const _emojis = ['😀', '😂', '😎', '😡', '😭', '👍', '🔥', '🤯'];
 
   late LudoEngine engine;
   late List<List<int>> disp; // displayed progress (animated step by step)
-  late final AnimationController timerCtl;
   late final AnimationController pulseCtl;
   late final AnimationController diceCtl;
   final Random rng = Random();
 
   bool busy = false; // dice rolling / token animating
-  bool paused = false; // an ad is on screen
   bool over = false;
   List<int> movable = [];
   int face = 1; // face shown on the CURRENT player's dice while rolling
@@ -48,22 +45,45 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   String? banner;
   final Map<int, String> bubbles = {};
   Timer? faceTimer, bannerTimer;
+  DateTime _lastImmersive = DateTime.fromMillisecondsSinceEpoch(0);
 
   GameConfig get cfg => widget.config;
+
+  /// Normal mode: a player who got all tokens home is out. Team Up: everybody keeps playing.
+  bool _finished(int color) => !cfg.teamUp && engine.ranking.contains(color);
   PlayerCfg playerOf(int color) => cfg.players.firstWhere((p) => p.color == color);
   bool isBot(int color) => playerOf(color).bot;
+
+  // ---------------------------------------------------------------- full screen
+
+  /// Hides status bar + navigation bar. Called again whenever Android brings the bars
+  /// back (app resumed, dialog / bottom sheet closed, system bars swiped in).
+  void _goImmersive() {
+    _lastImmersive = DateTime.now();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _goImmersive();
+  }
+
+  @override
+  void didChangeMetrics() {
+    // System bars appeared/disappeared -> make sure we stay full screen (throttled, no loop).
+    if (!mounted) return;
+    if (DateTime.now().difference(_lastImmersive) > const Duration(milliseconds: 800)) {
+      _goImmersive();
+    }
+  }
 
   @override
   void initState() {
     super.initState();
-    // Full screen (hide status bar + navigation bar) while the game is on
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    engine = LudoEngine(cfg.players.map((p) => p.color).toList());
+    WidgetsBinding.instance.addObserver(this);
+    _goImmersive();
+    engine = LudoEngine(cfg.players.map((p) => p.color).toList(), teamUp: cfg.teamUp);
     disp = engine.pos.map((e) => List<int>.from(e)).toList();
-    timerCtl = AnimationController(vsync: this, duration: const Duration(seconds: _turnSeconds))
-      ..addStatusListener((s) {
-        if (s == AnimationStatus.completed) _onTimeout();
-      });
     pulseCtl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..repeat(reverse: true);
     diceCtl = AnimationController(vsync: this, duration: const Duration(milliseconds: 750));
     WidgetsBinding.instance.addPostFrameCallback((_) => _afterState());
@@ -71,10 +91,10 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     faceTimer?.cancel();
     bannerTimer?.cancel();
-    timerCtl.dispose();
     pulseCtl.dispose();
     diceCtl.dispose();
     super.dispose();
@@ -91,39 +111,18 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     movable = [];
     final name = playerOf(engine.current).name;
     status = isBot(engine.current) ? "$name's turn" : "$name's turn - tap your dice";
-    timerCtl.forward(from: 0);
     setState(() {});
     if (isBot(engine.current)) _scheduleBot();
   }
 
   Future<void> _scheduleBot() async {
     await Future.delayed(const Duration(milliseconds: 900));
-    await _waitUnpaused();
     if (!mounted || over || busy) return;
     if (engine.phase == Phase.roll && isBot(engine.current)) _doRoll();
   }
 
-  Future<void> _waitUnpaused() async {
-    while (paused && mounted) {
-      await Future.delayed(const Duration(milliseconds: 300));
-    }
-  }
-
-  void _onTimeout() {
-    if (!mounted || over) return;
-    if (busy || paused) {
-      timerCtl.forward(from: 0);
-      return;
-    }
-    if (engine.phase == Phase.roll) {
-      _doRoll();
-    } else if (engine.phase == Phase.move) {
-      _doMove(chooseMove(engine));
-    }
-  }
-
   Future<void> _doRoll() async {
-    if (busy || paused || over || engine.phase != Phase.roll) return;
+    if (busy || over || engine.phase != Phase.roll) return;
     busy = true;
     movable = [];
     final who = engine.current;
@@ -163,18 +162,20 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     }
     movable = engine.legalMoves();
     busy = false;
-    status = isBot(who) ? '${playerOf(who).name} is thinking...' : 'Tap a token to move';
+    final mc = engine.movingColor;
+    status = isBot(who)
+        ? '${playerOf(who).name} is thinking...'
+        : mc != who
+            ? "Move your partner's ${kColorNames[mc]} token"
+            : 'Tap a token to move';
     setState(() {});
-    timerCtl.forward(from: 0);
 
     if (isBot(who)) {
       await Future.delayed(const Duration(milliseconds: 750));
-      await _waitUnpaused();
       if (!mounted || over || engine.phase != Phase.move) return;
       _doMove(chooseMove(engine));
     } else if (AppSettings.i.autoMove && movable.length == 1) {
       await Future.delayed(const Duration(milliseconds: 450));
-      await _waitUnpaused();
       if (mounted && !over && !busy && engine.phase == Phase.move && movable.length == 1) _doMove(movable.first);
     }
   }
@@ -182,7 +183,8 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   Future<void> _doMove(int t) async {
     if (busy || over || engine.phase != Phase.move || !movable.contains(t)) return;
     busy = true;
-    final c = engine.current;
+    final who = engine.current; // player whose turn it is
+    final c = engine.movingColor; // colour of the token being moved (partner's colour in Team Up)
     final before = engine.ranking.length;
     movable = [];
     final res = engine.move(t);
@@ -202,7 +204,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
       }
       Sfx.i.play('capture');
       Haptics.heavy();
-      _flash('💥 ${playerOf(c).name} captured a token!');
+      _flash('💥 ${playerOf(who).name} captured a token!');
       setState(() {});
       await Future.delayed(const Duration(milliseconds: 750));
     } else if (res.reachedHome) {
@@ -214,7 +216,9 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
       Sfx.i.play('safe');
     }
     if (engine.ranking.length > before && engine.phase != Phase.over) {
-      _flash('🎉 ${playerOf(c).name} finished ${ordinal(engine.ranking.length)}!');
+      _flash(cfg.teamUp
+          ? "🎉 ${playerOf(c).name}'s tokens are all home!"
+          : '🎉 ${playerOf(c).name} finished ${ordinal(engine.ranking.length)}!');
       Sfx.i.play('win');
       await Future.delayed(const Duration(milliseconds: 900));
     }
@@ -224,17 +228,17 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   }
 
   void _onTokenTap(int color, int t) {
-    if (color != engine.current || isBot(color) || busy || paused) return;
+    if (color != engine.movingColor || isBot(engine.current) || busy) return;
     _doMove(t);
   }
 
+  /// Match finished -> straight to the podium. (No ad here: ads are only shown at app launch
+  /// and when the player starts the NEXT game from the podium.)
   Future<void> _finish() async {
     if (over) return;
     over = true;
-    timerCtl.stop();
     setState(() => status = 'Game over!');
     await Future.delayed(const Duration(milliseconds: 1000));
-    await AdManager.showInterstitial(); // interstitial BEFORE the podium
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => PodiumScreen(config: cfg, ranking: List<int>.from(engine.ranking))),
@@ -286,7 +290,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           ],
         ),
       ),
-    );
+    ).then((_) => _goImmersive());
   }
 
   Future<bool> _confirmQuit() async {
@@ -296,12 +300,28 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         backgroundColor: const Color(0xFF241B4B),
         title: const Text('Quit match?'),
         content: const Text('Your current game will be lost.'),
+        actionsAlignment: MainAxisAlignment.center,
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep playing')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Quit')),
+          FancyButton(
+            color: const Color(0xFF2EBD59),
+            radius: 14,
+            glow: false,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            onTap: () => Navigator.pop(context, false),
+            child: const Text('Keep playing', style: TextStyle(fontWeight: FontWeight.w800, color: Colors.white)),
+          ),
+          FancyButton(
+            color: const Color(0xFFE53935),
+            radius: 14,
+            glow: false,
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+            onTap: () => Navigator.pop(context, true),
+            child: const Text('Quit', style: TextStyle(fontWeight: FontWeight.w800, color: Colors.white)),
+          ),
         ],
       ),
     );
+    _goImmersive();
     return r ?? false;
   }
 
@@ -317,12 +337,13 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
       },
       child: Scaffold(
         backgroundColor: const Color(0xFF14102B),
+        resizeToAvoidBottomInset: false,
         body: SafeArea(
           child: Column(
             children: [
               _topBar(),
+              if (cfg.teamUp) _teamBar(),
               _cardsRow([0, 1]),
-              _timerBar(),
               Expanded(
                 child: Center(
                   child: LayoutBuilder(builder: (_, box) {
@@ -333,7 +354,6 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
               ),
               _cardsRow([3, 2]),
               _controls(),
-              const BannerAdWidget(),
             ],
           ),
         ),
@@ -342,36 +362,66 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   }
 
   Widget _topBar() {
+    Widget round(IconData icon, String tip, VoidCallback onTap) => Padding(
+          padding: const EdgeInsets.only(left: 6),
+          child: FancyButton(
+            color: const Color(0xFF3B2F7A),
+            radius: 18,
+            glow: false,
+            padding: const EdgeInsets.all(7),
+            onTap: onTap,
+            child: Icon(icon, size: 19, color: Colors.white),
+          ),
+        );
     return ListenableBuilder(
       listenable: AppSettings.i,
       builder: (_, __) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
+        padding: const EdgeInsets.fromLTRB(10, 6, 10, 4),
         child: Row(
           children: [
-            IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
-              onPressed: () async {
-                if (await _confirmQuit() && mounted) Navigator.of(context).pop();
-              },
+            round(Icons.arrow_back_ios_new_rounded, 'Back', () async {
+              if (await _confirmQuit() && mounted) Navigator.of(context).pop();
+            }),
+            Expanded(
+              child: Text(cfg.teamUp ? 'TEAM UP' : 'LUDO ROYALE', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w900, letterSpacing: 2, fontSize: 16)),
             ),
-            const Expanded(
-              child: Text('LUDO ROYALE', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 2, fontSize: 16)),
-            ),
-            IconButton(
-              tooltip: 'Sound',
-              icon: Icon(AppSettings.i.sound ? Icons.volume_up_rounded : Icons.volume_off_rounded),
-              onPressed: () => AppSettings.i.setSound(!AppSettings.i.sound),
-            ),
-            IconButton(
-              tooltip: 'Vibration',
-              icon: Icon(AppSettings.i.vibration ? Icons.vibration_rounded : Icons.mobile_off_rounded),
-              onPressed: () => AppSettings.i.setVibration(!AppSettings.i.vibration),
-            ),
-            IconButton(tooltip: 'Settings', icon: const Icon(Icons.settings_rounded), onPressed: () => showSettingsDialog(context)),
+            round(AppSettings.i.sound ? Icons.volume_up_rounded : Icons.volume_off_rounded, 'Sound', () => AppSettings.i.setSound(!AppSettings.i.sound)),
+            round(AppSettings.i.vibration ? Icons.vibration_rounded : Icons.mobile_off_rounded, 'Vibration', () => AppSettings.i.setVibration(!AppSettings.i.vibration)),
+            round(Icons.settings_rounded, 'Settings', () => showSettingsDialog(context)),
           ],
         ),
       ),
     );
+  }
+
+  /// Team Up: live score of both teams (tokens home out of 8).
+  Widget _teamBar() {
+    Widget chip(int team) {
+      final cols = cfg.players.map((p) => p.color).where((c) => LudoEngine.teamOf(c) == team).toList();
+      final home = cols.fold<int>(0, (a, c) => a + disp[c].where((p) => p == kHomeProgress).length);
+      final active = LudoEngine.teamOf(engine.current) == team && !over;
+      return Expanded(
+        child: Container(
+          margin: EdgeInsets.fromLTRB(team == 0 ? 8 : 4, 2, team == 0 ? 4 : 8, 2),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: kTeamColors[team].withOpacity(active ? .35 : .15),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: active ? Colors.white : kTeamColors[team].withOpacity(.6), width: active ? 1.6 : 1),
+          ),
+          child: Row(
+            children: [
+              Text(team == 0 ? 'A' : 'B', style: const TextStyle(fontWeight: FontWeight.w900)),
+              const SizedBox(width: 6),
+              Expanded(child: Text(kTeamNames[team], maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11))),
+              Text('$home/8', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Row(children: [chip(0), chip(1)]);
   }
 
   Widget _cardsRow(List<int> colors) {
@@ -385,8 +435,8 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
   /// The dice that sits beside each player's home/card.
   Widget _playerDice(int color) {
-    final isCur = engine.current == color && !over && !engine.ranking.contains(color);
-    final canRoll = isCur && !isBot(color) && engine.phase == Phase.roll && !busy && !paused;
+    final isCur = engine.current == color && !over && !_finished(color);
+    final canRoll = isCur && !isBot(color) && engine.phase == Phase.roll && !busy;
     final value = isCur ? face : (faces[color] ?? 1);
     final accent = kPlayerColors[color];
 
@@ -421,7 +471,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
   Widget _card(int color) {
     final pc = playerOf(color);
-    final active = engine.current == color && !over && !engine.ranking.contains(color);
+    final active = engine.current == color && !over && !_finished(color);
     final home = disp[color].where((p) => p == kHomeProgress).length;
     final rank = engine.ranking.indexOf(color);
     final col = kPlayerColors[color];
@@ -447,7 +497,12 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(pc.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
-                  Text(rank >= 0 ? '#${rank + 1}  🏠 $home/4' : '🏠 $home/4', style: TextStyle(fontSize: 11, color: rank >= 0 ? Colors.amber : Colors.white70)),
+                  Text(
+                    cfg.teamUp
+                        ? '${LudoEngine.teamOf(color) == 0 ? 'A' : 'B'} · 🏠 $home/4${home == 4 ? ' ✅' : ''}'
+                        : (rank >= 0 ? '#${rank + 1}  🏠 $home/4' : '🏠 $home/4'),
+                    style: TextStyle(fontSize: 11, color: rank >= 0 && !cfg.teamUp ? Colors.amber : Colors.white70),
+                  ),
                 ],
               ),
             ),
@@ -462,28 +517,6 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _timerBar() {
-    return AnimatedBuilder(
-      animation: timerCtl,
-      builder: (_, __) {
-        final left = (1 - timerCtl.value);
-        final color = over ? Colors.grey : kPlayerColors[engine.current];
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: LinearProgressIndicator(
-              value: over ? 0 : left,
-              minHeight: 7,
-              backgroundColor: Colors.white12,
-              valueColor: AlwaysStoppedAnimation(left < .25 ? Colors.redAccent : color),
-            ),
-          ),
-        );
-      },
     );
   }
 
@@ -545,7 +578,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         final k = list[i];
         final dx = n == 1 ? 0.0 : ((i % cols) - (cols - 1) / 2) * sp;
         final dy = n == 1 ? 0.0 : ((i ~/ cols) - (rows - 1) / 2) * sp;
-        final highlighted = curHuman && !busy && k.c == engine.current && movable.contains(k.t);
+        final highlighted = curHuman && !busy && k.c == engine.movingColor && movable.contains(k.t);
         final w = AnimatedPositioned(
           key: ValueKey('tk${k.c}_${k.t}'),
           duration: const Duration(milliseconds: 170),
@@ -572,10 +605,10 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     return [...normal, ...hi];
   }
 
-  /// Bottom bar: status text + chat button (dice, Re-roll and Undo are gone).
+  /// Bottom bar: status text + chat button.
   Widget _controls() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
       child: Row(
         children: [
           Expanded(
@@ -589,23 +622,19 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   }
 
   Widget _pill(IconData icon, String label, bool enabled, VoidCallback onTap) {
-    return Opacity(
-      opacity: enabled ? 1 : .4,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: enabled ? onTap : null,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-          decoration: BoxDecoration(color: const Color(0xFF241B4B), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.white24)),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 16),
-              const SizedBox(width: 5),
-              Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
-            ],
-          ),
-        ),
+    return FancyButton(
+      color: const Color(0xFF5B3FD6),
+      radius: 20,
+      glow: false,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      onTap: enabled ? onTap : null,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: Colors.white),
+          const SizedBox(width: 6),
+          Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white)),
+        ],
       ),
     );
   }
