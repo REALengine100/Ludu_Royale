@@ -55,11 +55,12 @@ class BoardPainter extends CustomPainter {
       );
       for (int i = 0; i < 4; i++) {
         final c = baseSlot(k, i) * u;
-        canvas.drawCircle(c, u * .62, Paint()..color = col.withOpacity(.3));
-        canvas.drawCircle(c, u * .62, Paint()
-          ..color = darken(col, .1)
+        canvas.drawCircle(c, u * .68, Paint()..color = darken(col, .38));
+        canvas.drawCircle(c, u * .68, Paint()
+          ..color = Colors.white
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5);
+          ..strokeWidth = 2);
+        canvas.drawCircle(c, u * .52, Paint()..color = Colors.black.withOpacity(.2));
       }
     }
 
@@ -142,17 +143,24 @@ class BoardPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-/// Premium 3D pawn (head + collar + body + base). Same API as the old round token.
+/// Premium 3D pawn with dark edge, glow highlight and dim state.
 class TokenView extends StatelessWidget {
   final Color color;
-  final double glow; // 0..1 pulsing highlight (0 = none)
-  final bool highlighted;
-  const TokenView({super.key, required this.color, this.glow = 0, this.highlighted = false});
+  final double glow; // 0..1 pulsing value
+  final bool highlighted; // movable now
+  final bool dimmed; // not movable while it's this player's turn
+  const TokenView({
+    super.key,
+    required this.color,
+    this.glow = 0,
+    this.highlighted = false,
+    this.dimmed = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     return SizedBox.expand(
-      child: CustomPaint(painter: _PawnPainter(color, highlighted, glow)),
+      child: CustomPaint(painter: _PawnPainter(color, highlighted, glow, dimmed)),
     );
   }
 }
@@ -161,40 +169,69 @@ class _PawnPainter extends CustomPainter {
   final Color color;
   final bool highlighted;
   final double glow;
-  _PawnPainter(this.color, this.highlighted, this.glow);
+  final bool dimmed;
+  _PawnPainter(this.color, this.highlighted, this.glow, this.dimmed);
 
   @override
   void paint(Canvas canvas, Size s) {
     final w = s.width, h = s.height;
+    if (dimmed) {
+      canvas.saveLayer(Offset.zero & s, Paint()..color = Colors.white.withOpacity(.5));
+    }
 
-    // soft ground shadow
+    // ground shadow
     canvas.drawOval(
       Rect.fromLTWH(w * .14, h * .80, w * .72, h * .16),
       Paint()
-        ..color = Colors.black.withOpacity(.38)
+        ..color = Colors.black.withOpacity(.4)
         ..maskFilter = MaskFilter.blur(BlurStyle.normal, w * .04),
     );
 
-    // glowing ring under a movable pawn
+    // highlight: golden halo + ring, pawn lifts up and down
     if (highlighted) {
-      canvas.drawOval(
-        Rect.fromLTWH(w * .06, h * .72, w * .88, h * .26),
+      const gold = Color(0xFFFFD600);
+      canvas.drawCircle(
+        Offset(w * .5, h * .5),
+        w * .62,
         Paint()
-          ..color = Colors.white.withOpacity(.55 + .45 * glow)
-          ..maskFilter = MaskFilter.blur(BlurStyle.normal, w * (.07 + .05 * glow)),
+          ..color = gold.withOpacity(.20 + .25 * glow)
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, w * .12),
       );
+      final ring = Rect.fromLTWH(w * .02, h * .68, w * .96, h * .30);
+      canvas.drawOval(
+        ring,
+        Paint()
+          ..color = Colors.black.withOpacity(.6)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = w * .11,
+      );
+      canvas.drawOval(
+        ring,
+        Paint()
+          ..color = gold.withOpacity(.75 + .25 * glow)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = w * .075,
+      );
+      canvas.translate(0, -h * .05 * glow);
     }
 
     final light = lighten(color, .32);
     final dark = darken(color, .22);
+
+    final edge = Paint()
+      ..color = const Color(0xFF1A1A1A)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * .11
+      ..strokeJoin = StrokeJoin.round;
     final outline = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.stroke
-      ..strokeWidth = w * (highlighted ? .075 : .055)
+      ..strokeWidth = w * .055
       ..strokeJoin = StrokeJoin.round;
 
     // base disc
     final baseRect = Rect.fromLTWH(w * .15, h * .70, w * .70, h * .22);
+    canvas.drawOval(baseRect, edge);
     canvas.drawOval(baseRect, outline);
     canvas.drawOval(
       baseRect,
@@ -206,7 +243,7 @@ class _PawnPainter extends CustomPainter {
         ).createShader(baseRect),
     );
 
-    // body (cone with concave sides)
+    // body
     final body = Path()
       ..moveTo(w * .22, h * .80)
       ..quadraticBezierTo(w * .44, h * .70, w * .42, h * .46)
@@ -214,6 +251,7 @@ class _PawnPainter extends CustomPainter {
       ..quadraticBezierTo(w * .56, h * .70, w * .78, h * .80)
       ..quadraticBezierTo(w * .50, h * .87, w * .22, h * .80)
       ..close();
+    canvas.drawPath(body, edge);
     canvas.drawPath(body, outline);
     canvas.drawPath(
       body,
@@ -228,6 +266,7 @@ class _PawnPainter extends CustomPainter {
 
     // collar
     final collar = Rect.fromLTWH(w * .33, h * .40, w * .34, h * .11);
+    canvas.drawOval(collar, edge);
     canvas.drawOval(collar, outline);
     canvas.drawOval(
       collar,
@@ -242,6 +281,7 @@ class _PawnPainter extends CustomPainter {
     // head
     final headC = Offset(w * .5, h * .29);
     final headR = w * .205;
+    canvas.drawCircle(headC, headR, edge);
     canvas.drawCircle(headC, headR, outline);
     canvas.drawCircle(
       headC,
@@ -254,12 +294,12 @@ class _PawnPainter extends CustomPainter {
           stops: const [0, .55, 1],
         ).createShader(Rect.fromCircle(center: headC, radius: headR)),
     );
-
-    // specular highlight on the head
     canvas.drawCircle(Offset(w * .43, h * .22), w * .055, Paint()..color = Colors.white.withOpacity(.8));
+
+    if (dimmed) canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant _PawnPainter old) =>
-      old.color != color || old.highlighted != highlighted || old.glow != glow;
+      old.color != color || old.highlighted != highlighted || old.glow != glow || old.dimmed != dimmed;
 }
