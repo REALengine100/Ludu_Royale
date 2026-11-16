@@ -67,21 +67,25 @@ class MoveResult {
 
 class LudoEngine {
   final List<int> colors; // active colours in turn order
+  final bool teamUp; // Team Up mode (4 players): Red+Yellow vs Green+Blue
   final List<List<int>> pos; // pos[color][token]
   int turn = 0;
   int dice = 1;
   int sixes = 0;
   Phase phase = Phase.roll;
   final List<int> ranking; // colours in finishing order
+  int? winnerTeam; // Team Up only: 0 = Red+Yellow, 1 = Green+Blue (set when the game is over)
   final Random rng;
 
-  LudoEngine(this.colors, {Random? rng})
+  LudoEngine(this.colors, {Random? rng, this.teamUp = false})
       : pos = List.generate(4, (_) => List.filled(4, -1)),
         ranking = [],
         rng = rng ?? Random();
 
   LudoEngine._copy(LudoEngine o)
       : colors = o.colors,
+        teamUp = o.teamUp,
+        winnerTeam = o.winnerTeam,
         pos = o.pos.map((e) => List<int>.from(e)).toList(),
         turn = o.turn,
         dice = o.dice,
@@ -93,6 +97,20 @@ class LudoEngine {
   LudoEngine clone() => LudoEngine._copy(this);
 
   int get current => colors[turn];
+
+  // ---------------------------------------------------------------- Team Up helpers
+
+  /// Partner sits opposite: Red<->Yellow, Green<->Blue.
+  static int partnerOf(int c) => (c + 2) % 4;
+  static int teamOf(int c) => c % 2;
+  bool sameTeam(int a, int b) => teamUp && teamOf(a) == teamOf(b);
+
+  bool _allHome(int c) => pos[c].every((p) => p == kHomeProgress);
+  int _homeCount(int c) => pos[c].where((p) => p == kHomeProgress).length;
+
+  /// Colour whose tokens the player on turn moves. Normally the player's own colour;
+  /// in Team Up, once all 4 of a player's tokens are home he moves his partner's tokens.
+  int get movingColor => (teamUp && _allHome(current)) ? partnerOf(current) : current;
 
   /// Rolls the dice. Handles three-sixes forfeit and auto-skip when nothing can move.
   RollOutcome roll([int? forced]) {
@@ -123,7 +141,7 @@ class LudoEngine {
   }
 
   List<int> legalMoves() {
-    final c = current;
+    final c = movingColor;
     final res = <int>[];
     for (int t = 0; t < 4; t++) {
       final p = pos[c][t];
@@ -141,7 +159,7 @@ class LudoEngine {
     final res = <List<int>>[];
     if (kSafeTiles.contains(tile)) return res;
     for (final oc in colors) {
-      if (oc == color) continue;
+      if (oc == color || sameTeam(oc, color)) continue; // partner tokens are never captured
       final here = <int>[];
       for (int i = 0; i < 4; i++) {
         final p = pos[oc][i];
@@ -156,7 +174,7 @@ class LudoEngine {
   int threatsTo(int color, int tile) {
     int n = 0;
     for (final oc in colors) {
-      if (oc == color) continue;
+      if (oc == color || sameTeam(oc, color)) continue;
       for (int i = 0; i < 4; i++) {
         final p = pos[oc][i];
         if (p < 0 || p > 50) continue;
@@ -168,7 +186,7 @@ class LudoEngine {
   }
 
   MoveResult move(int t) {
-    final c = current;
+    final c = movingColor;
     final from = pos[c][t];
     final path = <int>[];
     int to;
@@ -196,18 +214,33 @@ class LudoEngine {
     final reached = to == kHomeProgress;
     bool bonus = dice == 6 || captured.isNotEmpty || reached;
 
-    if (pos[c].every((p) => p == kHomeProgress)) {
-      ranking.add(c);
-      bonus = false;
-    }
-    final remaining = colors.where((x) => !ranking.contains(x)).toList();
-    if (remaining.length <= 1) {
-      if (remaining.length == 1) ranking.add(remaining.first);
-      phase = Phase.over;
-    } else if (bonus) {
-      phase = Phase.roll; // same player rolls again
+    if (teamUp) {
+      // Team Up: a team wins when all 8 of its tokens are home. Finished players keep rolling for their partner.
+      if (_allHome(c) && !ranking.contains(c)) ranking.add(c);
+      final team = teamOf(c);
+      if (colors.where((x) => teamOf(x) == team).every(_allHome)) {
+        winnerTeam = team;
+        _finalizeTeamRanking(team);
+        phase = Phase.over;
+      } else if (bonus) {
+        phase = Phase.roll;
+      } else {
+        _advance();
+      }
     } else {
-      _advance();
+      if (pos[c].every((p) => p == kHomeProgress)) {
+        ranking.add(c);
+        bonus = false;
+      }
+      final remaining = colors.where((x) => !ranking.contains(x)).toList();
+      if (remaining.length <= 1) {
+        if (remaining.length == 1) ranking.add(remaining.first);
+        phase = Phase.over;
+      } else if (bonus) {
+        phase = Phase.roll; // same player rolls again
+      } else {
+        _advance();
+      }
     }
     return MoveResult(
       color: c,
@@ -222,11 +255,23 @@ class LudoEngine {
     );
   }
 
+  /// Final order for the podium: winning team first, then the other team by tokens home.
+  void _finalizeTeamRanking(int team) {
+    final win = ranking.where((x) => teamOf(x) == team).toList();
+    final lose = colors.where((x) => teamOf(x) != team).toList()
+      ..sort((a, b) => _homeCount(b).compareTo(_homeCount(a)));
+    ranking
+      ..clear()
+      ..addAll(win)
+      ..addAll(lose);
+  }
+
   void _advance() {
     sixes = 0;
     do {
       turn = (turn + 1) % colors.length;
-    } while (ranking.contains(colors[turn]));
+      // Team Up: finished players are never skipped (they move their partner's tokens)
+    } while (!teamUp && ranking.contains(colors[turn]));
     phase = Phase.roll;
   }
 }
