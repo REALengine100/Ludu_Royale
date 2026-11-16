@@ -9,6 +9,10 @@ const List<Color> kPlayerColors = [
 ];
 const List<String> kColorNames = ['Red', 'Green', 'Yellow', 'Blue'];
 
+/// Team Up teams: partners sit opposite each other (colour % 2 decides the team).
+const List<String> kTeamNames = ['Red & Yellow', 'Green & Blue'];
+const List<Color> kTeamColors = [Color(0xFFFF7043), Color(0xFF26A69A)];
+
 Color darken(Color c, [double amount = .25]) {
   final h = HSLColor.fromColor(c);
   return h.withLightness((h.lightness - amount).clamp(0.0, 1.0)).toColor();
@@ -31,5 +35,8 @@ class PlayerCfg {
 class GameConfig {
   final List<PlayerCfg> players;
   final bool vsComputer;
-  const GameConfig(this.players, this.vsComputer);
+
+  /// Team Up mode (needs exactly 4 players: Red+Yellow vs Green+Blue).
+  final bool teamUp;
+  const GameConfig(this.players, this.vsComputer, {this.teamUp = false});
 }
