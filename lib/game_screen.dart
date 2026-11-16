@@ -570,7 +570,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
     groups.forEach((_, list) {
       final n = list.length;
       final isBase = list.first.p == -1;
-      final double sz = isBase ? .95 : n == 1 ? .8 : n == 2 ? .62 : n <= 4 ? .52 : .42;
+      final double sz = isBase ? 1.05 : n == 1 ? .8 : n == 2 ? .62 : n <= 4 ? .52 : .42;
       final double sp = n <= 2 ? .36 : .33;
       final cols = n <= 2 ? n : sqrt(n).ceil();
       final rows = (n / cols).ceil();
@@ -579,6 +579,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
         final dx = n == 1 ? 0.0 : ((i % cols) - (cols - 1) / 2) * sp;
         final dy = n == 1 ? 0.0 : ((i ~/ cols) - (rows - 1) / 2) * sp;
         final highlighted = curHuman && !busy && k.c == engine.movingColor && movable.contains(k.t);
+        final dimmed = curHuman && !busy && movable.isNotEmpty && k.c == engine.movingColor && !movable.contains(k.t);
         final w = AnimatedPositioned(
           key: ValueKey('tk${k.c}_${k.t}'),
           duration: const Duration(milliseconds: 170),
@@ -594,7 +595,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
               animation: pulseCtl,
               builder: (_, __) => Transform.scale(
                 scale: highlighted ? 1 + .12 * pulseCtl.value : 1,
-                child: TokenView(color: kPlayerColors[k.c], highlighted: highlighted, glow: pulseCtl.value),
+                child: TokenView(color: kPlayerColors[k.c], highlighted: highlighted, dimmed: dimmed, glow: pulseCtl.value),
               ),
             ),
           ),
