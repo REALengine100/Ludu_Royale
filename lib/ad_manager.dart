@@ -5,6 +5,10 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 enum AdResult { notReady, earned, dismissed }
 
+/// Master switch for ALL ads (app launch, next game, menu banner, rewarded video).
+/// Set to false to turn every ad off.
+const bool kAdsEnabled = true;
+
 /// ============================================================================
 ///  ADMOB CONFIGURATION
 /// ============================================================================
@@ -19,10 +23,12 @@ enum AdResult { notReady, earned, dismissed }
 ///    ADMOB_REWARDED_ID      ca-app-pub-XXXXXXXXXXXXXXXX/NNNNNNNNNN   (optional)
 /// ============================================================================
 class AdManager {
-  static const bool _prod = bool.fromEnvironment('ADMOB_PROD', defaultValue: false);
-  static const String _prodBanner = String.fromEnvironment('ADMOB_BANNER');
-  static const String _prodInter = String.fromEnvironment('ADMOB_INTER');
-  static const String _prodReward = String.fromEnvironment('ADMOB_REWARD');
+  // Real Ludo Royale ad units (AdMob). Set _useRealAds to false to go back to Google test ads.
+  static const bool _useRealAds = true;
+  static const bool _prod = _useRealAds || bool.fromEnvironment('ADMOB_PROD', defaultValue: false);
+  static const String _prodBanner = 'ca-app-pub-3567057759843449/9535660266';
+  static const String _prodInter = 'ca-app-pub-3567057759843449/4550926893';
+  static const String _prodReward = 'ca-app-pub-3567057759843449/6957598387';
 
   // ---------------- Official Google TEST ad units ----------------
   static const _testBannerAndroid = 'ca-app-pub-3940256099942544/6300978111';
