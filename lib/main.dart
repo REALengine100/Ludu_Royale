@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'screens/menu_screen.dart';
 import 'dart:async';
+import 'app_settings.dart';
+import 'progress.dart';
 
 void main() {
-  runZonedGuarded(() {
+  runZonedGuarded(() async {
     WidgetsFlutterBinding.ensureInitialized();
+    await AppSettings.i.load();
+    await Progress.i.load();
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     runApp(const LudoApp());
   }, (error, stack) {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'themes.dart';
 
 /// Premium glossy dice. Same API as before (value, accent, size, glow),
 /// so game_screen.dart needs no change.
@@ -7,21 +8,23 @@ class DiceView extends StatelessWidget {
   final Color accent;
   final double size;
   final bool glow;
-  const DiceView({super.key, required this.value, required this.accent, this.size = 80, this.glow = false});
+  final DiceTheme? theme; // null = the dice equipped in the shop
+  const DiceView({super.key, required this.value, required this.accent, this.size = 80, this.glow = false, this.theme});
 
   @override
   Widget build(BuildContext context) {
     final radius = size * .24;
+    final th = theme ?? currentDice();
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(radius),
         // ivory body with a soft 3D light from the top-left
-        gradient: const RadialGradient(
+        gradient: RadialGradient(
           center: Alignment(-.45, -.55),
           radius: 1.25,
-          colors: [Color(0xFFFFFFFF), Color(0xFFF1F2F8), Color(0xFFC7CCDB)],
+          colors: th.body,
           stops: [0, .55, 1],
         ),
         border: Border.all(color: accent, width: size * .05),
@@ -34,7 +37,7 @@ class DiceView extends StatelessWidget {
           BoxShadow(color: Colors.black.withOpacity(.55), blurRadius: size * .12, offset: Offset(0, size * .07)),
         ],
       ),
-      child: CustomPaint(painter: _DicePainter(value, accent, radius)),
+      child: CustomPaint(painter: _DicePainter(value, accent, radius, th.pip)),
     );
   }
 }
@@ -43,7 +46,8 @@ class _DicePainter extends CustomPainter {
   final int v;
   final Color accent;
   final double radius;
-  _DicePainter(this.v, this.accent, this.radius);
+  final List<Color> pip;
+  _DicePainter(this.v, this.accent, this.radius, this.pip);
 
   static const _faces = {
     1: [4],
@@ -104,7 +108,7 @@ class _DicePainter extends CustomPainter {
       // pip body, a bit glossy
       final colors = one
           ? [Color.lerp(accent, Colors.white, .35)!, accent, Color.lerp(accent, Colors.black, .45)!]
-          : const [Color(0xFF6A6F8F), Color(0xFF1B1840), Color(0xFF0D0B22)];
+          : pip;
       canvas.drawCircle(
         c,
         pr,
@@ -122,5 +126,5 @@ class _DicePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _DicePainter old) => old.v != v || old.accent != accent || old.radius != radius;
+  bool shouldRepaint(covariant _DicePainter old) => old.v != v || old.accent != accent || old.radius != radius || old.pip != pip;
 }

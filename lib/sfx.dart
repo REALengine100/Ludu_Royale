@@ -108,8 +108,10 @@ class Sfx {
     _bank['step'] = step.wav();
 
     final cap = _Wave()
-      ..tone(760, .32, vol: .5, f2: 140, square: true, decay: 2.5)
-      ..tone(110, .15, vol: .5, decay: 5);
+      ..tone(950, .20, vol: .5, f2: 130, square: true, decay: 2.2)
+      ..noise(.12, vol: .55)
+      ..tone(95, .22, vol: .65, f2: 45, decay: 4)
+      ..tone(1250, .06, vol: .3, decay: 5);
     _bank['capture'] = cap.wav();
 
     final safe = _Wave()
@@ -124,6 +126,11 @@ class Sfx {
     win.tone(783.99, .12, vol: .45, decay: 2);
     win.tone(1046.5, .6, vol: .55, decay: 2.2);
     _bank['win'] = win.wav();
+
+    final coin = _Wave()
+      ..tone(988, .07, vol: .45, decay: 3)
+      ..tone(1319, .24, vol: .5, decay: 3);
+    _bank['coin'] = coin.wav();
 
     final pop = _Wave()..tone(660, .09, vol: .4, f2: 990, decay: 4);
     _bank['pop'] = pop.wav();

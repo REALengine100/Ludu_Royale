@@ -6,6 +6,7 @@ import 'models.dart';
 import 'sfx.dart';
 import 'game_screen.dart';
 import 'menu_screen.dart';
+import 'rewards_ui.dart';
 
 class PodiumScreen extends StatefulWidget {
   final GameConfig config;
@@ -210,6 +211,7 @@ class _PodiumScreenState extends State<PodiumScreen> with SingleTickerProviderSt
                       style: const TextStyle(fontSize: 18, color: Colors.white70),
                     ),
                   Expanded(child: _team ? _teamResult() : _normalResult()),
+                  const RewardSummary(),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(24, 0, 24, 28),
                     child: Row(

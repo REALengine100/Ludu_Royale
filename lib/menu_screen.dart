@@ -5,6 +5,10 @@ import '../services/ad_manager.dart';
 import '../services/app_settings.dart';
 import '../widgets/dialogs.dart';
 import 'game_screen.dart';
+import 'progress.dart';
+import 'rewards_ui.dart';
+import 'shop_screen.dart';
+import 'stats_screen.dart';
 
 enum GameMode { passPlay, vsComputer, teamUp }
 
@@ -100,7 +104,10 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _showLaunchAd());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _showLaunchAd();
+      _maybeDaily();
+    });
   }
 
   @override
@@ -123,6 +130,14 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
       await Future.delayed(const Duration(milliseconds: 700)); // not loaded yet -> try again
     }
   }
+
+  void _maybeDaily() {
+    if (!mounted || !Progress.i.dailyAvailable) return;
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
+    showDailyDialog(context);
+  }
+
+  void _openShop() => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ShopScreen()));
 
   void _openSetup(GameMode mode) {
     showModalBottomSheet(
@@ -265,10 +280,15 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: ListenableBuilder(
-        listenable: AppSettings.i,
+        listenable: Listenable.merge([AppSettings.i, Progress.i]),
         builder: (_, __) => Row(
-          mainAxisAlignment: MainAxisAlignment.end,
           children: [
+            CoinChip(onTap: _openShop),
+            const Spacer(),
+            if (Progress.i.dailyAvailable) ...[
+              _roundIcon(Icons.card_giftcard_rounded, () => showDailyDialog(context)),
+              const SizedBox(width: 10),
+            ],
             _roundIcon(AppSettings.i.sound ? Icons.volume_up_rounded : Icons.volume_off_rounded, () => AppSettings.i.setSound(!AppSettings.i.sound)),
             const SizedBox(width: 10),
             _roundIcon(Icons.settings_rounded, () => showSettingsDialog(context)),
@@ -401,11 +421,14 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
             Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
           ]),
         );
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    return Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 12,
+      runSpacing: 10,
       children: [
+        pill(Icons.storefront_rounded, 'Shop', _openShop),
+        pill(Icons.emoji_events_rounded, 'Stats', () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StatsScreen()))),
         pill(Icons.menu_book_rounded, 'Rules', () => showRulesDialog(context)),
-        const SizedBox(width: 14),
         pill(Icons.settings_rounded, 'Settings', () => showSettingsDialog(context)),
       ],
     );

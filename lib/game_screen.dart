@@ -7,6 +7,8 @@ import '../engine/ludo_engine.dart';
 import '../models.dart';
 import '../services/app_settings.dart';
 import '../services/sfx.dart';
+import 'progress.dart';
+import 'themes.dart';
 import '../widgets/board_painter.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/dice_view.dart';
@@ -34,6 +36,9 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
   late List<List<int>> disp; // displayed progress (animated step by step)
   late final AnimationController pulseCtl;
   late final AnimationController diceCtl;
+  late final AnimationController fxCtl; // capture burst + board shake
+  List<CaptureFx> fx = [];
+  final List<Achievement> _ach = [];
   final Random rng = Random();
 
   bool busy = false; // dice rolling / token animating
@@ -86,6 +91,8 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
     disp = engine.pos.map((e) => List<int>.from(e)).toList();
     pulseCtl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..repeat(reverse: true);
     diceCtl = AnimationController(vsync: this, duration: const Duration(milliseconds: 750));
+    fxCtl = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
+    Progress.i.startGame();
     WidgetsBinding.instance.addPostFrameCallback((_) => _afterState());
   }
 
@@ -97,6 +104,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
     bannerTimer?.cancel();
     pulseCtl.dispose();
     diceCtl.dispose();
+    fxCtl.dispose();
     super.dispose();
   }
 
@@ -142,6 +150,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
     final out = engine.roll();
     face = engine.dice;
     faces[who] = face;
+    if (face == 6 && !isBot(who)) _ach.addAll(Progress.i.onSix());
     Haptics.light();
     if (out == RollOutcome.forfeit) {
       status = 'Three 6s in a row - turn forfeited!';
@@ -199,9 +208,12 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
       if (!mounted) return;
     }
     if (res.captured.isNotEmpty) {
+      fx = [for (final cp in res.captured) CaptureFx(cellCenter(cp[0], disp[cp[0]][cp[1]], cp[1]), kPlayerColors[cp[0]])];
+      fxCtl.forward(from: 0);
       for (final cp in res.captured) {
         disp[cp[0]][cp[1]] = -1;
       }
+      if (!isBot(who)) _ach.addAll(Progress.i.onCapture(res.captured.length));
       Sfx.i.play('capture');
       Haptics.heavy();
       _flash('💥 ${playerOf(who).name} captured a token!');
@@ -211,10 +223,13 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
       Sfx.i.play('safe');
       Haptics.medium();
       _flash('🏠 Token home!');
+      if (!isBot(who)) _ach.addAll(Progress.i.onHome());
       await Future.delayed(const Duration(milliseconds: 500));
     } else if (res.landedSafe) {
       Sfx.i.play('safe');
     }
+    await _flushAch();
+    if (!mounted) return;
     if (engine.ranking.length > before && engine.phase != Phase.over) {
       _flash(cfg.teamUp
           ? "🎉 ${playerOf(c).name}'s tokens are all home!"
@@ -227,6 +242,16 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
     _afterState();
   }
 
+  /// Shows each newly unlocked achievement (coins already added) one after another.
+  Future<void> _flushAch() async {
+    while (_ach.isNotEmpty && mounted) {
+      final a = _ach.removeAt(0);
+      Sfx.i.play('coin');
+      _flash('${a.icon} ${a.title}  +${a.reward} 🪙');
+      await Future.delayed(const Duration(milliseconds: 1400));
+    }
+  }
+
   void _onTokenTap(int color, int t) {
     if (color != engine.movingColor || isBot(engine.current) || busy) return;
     _doMove(t);
@@ -237,6 +262,19 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
   Future<void> _finish() async {
     if (over) return;
     over = true;
+    final humans = cfg.players.where((p) => !p.bot).map((p) => p.color).toList();
+    final hasBot = cfg.players.any((p) => p.bot);
+    bool won = false;
+    if (hasBot && humans.isNotEmpty && engine.ranking.isNotEmpty) {
+      won = cfg.teamUp
+          ? LudoEngine.teamOf(engine.ranking.first) == LudoEngine.teamOf(humans.first)
+          : humans.contains(engine.ranking.first);
+    }
+    Progress.i.endGame(won: won);
+    if (Progress.i.lastGameCoins > 0) {
+      Sfx.i.play('coin');
+      _flash('+${Progress.i.lastGameCoins} 🪙');
+    }
     setState(() => status = 'Game over!');
     await Future.delayed(const Duration(milliseconds: 1000));
     if (!mounted) return;
@@ -522,13 +560,34 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
 
   Widget _board(double s) {
     final u = s / 15;
+    return AnimatedBuilder(
+      animation: fxCtl,
+      builder: (_, child) => Transform.translate(
+        offset: Offset(fxCtl.isAnimating ? sin(fxCtl.value * pi * 9) * 4 * (1 - fxCtl.value) : 0, 0),
+        child: child,
+      ),
+      child: _boardBody(s, u),
+    );
+  }
+
+  Widget _boardBody(double s, double u) {
     return SizedBox(
       width: s,
       height: s,
       child: Stack(
         children: [
-          const Positioned.fill(child: CustomPaint(painter: BoardPainter())),
+          Positioned.fill(child: CustomPaint(painter: BoardPainter(currentBoard()))),
           ..._tokens(u),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: AnimatedBuilder(
+                animation: fxCtl,
+                builder: (_, __) => fxCtl.isAnimating
+                    ? CustomPaint(painter: CaptureBurstPainter(fx, fxCtl.value))
+                    : const SizedBox.shrink(),
+              ),
+            ),
+          ),
           if (banner != null)
             Positioned.fill(
               child: IgnorePointer(
