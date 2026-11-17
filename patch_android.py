@@ -9,7 +9,11 @@
 import os, re
 
 # Official Google TEST app id. Replace with your real one (ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY).
-ADMOB_APP_ID = os.environ.get("ADMOB_APP_ID", "ca-app-pub-3940256099942544~3347511713")  # <<< STEP 3
+_TEST_APP_ID = "ca-app-pub-3940256099942544~3347511713"
+_REAL_APP_ID = "ca-app-pub-3567057759843449~1026614859"  # Ludo Royale (AdMob)
+_env_id = os.environ.get("ADMOB_APP_ID", "")
+# build.yml falls back to the test id when no secret is set, so treat the test id as "not set"
+ADMOB_APP_ID = _env_id if _env_id and _env_id != _TEST_APP_ID else _REAL_APP_ID
 APP_LABEL = "Ludo Royale"
 
 # ---- manifest
