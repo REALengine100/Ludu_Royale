@@ -2,6 +2,8 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import '../engine/ludo_engine.dart';
 import '../models.dart';
+import 'progress.dart';
+import 'themes.dart';
 
 const List<List<int>> _origins = [
   [0, 0],
@@ -30,28 +32,30 @@ Offset cellCenter(int color, int p, int id) {
 }
 
 class BoardPainter extends CustomPainter {
-  const BoardPainter();
+  final BoardTheme theme;
+  const BoardPainter(this.theme);
 
   @override
   void paint(Canvas canvas, Size size) {
     final u = size.width / 15;
     canvas.save();
     canvas.clipRRect(RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(u * .4)));
-    canvas.drawRect(Offset.zero & size, Paint()..color = Colors.white);
+    canvas.drawRect(Offset.zero & size, Paint()..color = theme.cell);
 
     final line = Paint()
-      ..color = const Color(0xFF9E9E9E)
+      ..color = theme.line
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.8;
 
     // Quadrants + bases
     for (int k = 0; k < 4; k++) {
       final col = kPlayerColors[k];
+      final qc = theme.quadDark == 0 ? col : darken(col, theme.quadDark);
       final ox = _origins[k][0] * u, oy = _origins[k][1] * u;
-      canvas.drawRect(Rect.fromLTWH(ox, oy, 6 * u, 6 * u), Paint()..color = col);
+      canvas.drawRect(Rect.fromLTWH(ox, oy, 6 * u, 6 * u), Paint()..color = qc);
       canvas.drawRRect(
         RRect.fromRectAndRadius(Rect.fromLTWH(ox + u, oy + u, 4 * u, 4 * u), Radius.circular(u * .5)),
-        Paint()..color = Colors.white,
+        Paint()..color = theme.inner,
       );
       for (int i = 0; i < 4; i++) {
         final c = baseSlot(k, i) * u;
@@ -67,12 +71,12 @@ class BoardPainter extends CustomPainter {
     // Track cells
     for (int i = 0; i < kTrack.length; i++) {
       final r = Rect.fromLTWH(kTrack[i][0] * u, kTrack[i][1] * u, u, u);
-      Color fill = Colors.white;
+      Color fill = theme.cell;
       if (i % 13 == 0) fill = kPlayerColors[i ~/ 13];
       canvas.drawRect(r, Paint()..color = fill);
       canvas.drawRect(r, line);
       if (kStarTiles.contains(i)) {
-        canvas.drawPath(_star(r.center, u * .36), Paint()..color = const Color(0xFF757575));
+        canvas.drawPath(_star(r.center, u * .36), Paint()..color = theme.star);
       }
     }
     // Start-square marker (small white dot) so they read as "safe"
@@ -117,7 +121,7 @@ class BoardPainter extends CustomPainter {
     canvas.drawRRect(
       RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(u * .4)),
       Paint()
-        ..color = const Color(0xFF263238)
+        ..color = theme.frame
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3,
     );
@@ -140,27 +144,29 @@ class BoardPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => oldDelegate is! BoardPainter || oldDelegate.theme.id != theme.id;
 }
 
-/// Premium 3D pawn with dark edge, glow highlight and dim state.
+/// Pawn with several styles (classic / ball / gem), dark edge, glow highlight and dim state.
 class TokenView extends StatelessWidget {
   final Color color;
   final double glow; // 0..1 pulsing value
   final bool highlighted; // movable now
   final bool dimmed; // not movable while it's this player's turn
+  final String? style; // null = the style equipped in the shop
   const TokenView({
     super.key,
     required this.color,
     this.glow = 0,
     this.highlighted = false,
     this.dimmed = false,
+    this.style,
   });
 
   @override
   Widget build(BuildContext context) {
     return SizedBox.expand(
-      child: CustomPaint(painter: _PawnPainter(color, highlighted, glow, dimmed)),
+      child: CustomPaint(painter: _PawnPainter(color, highlighted, glow, dimmed, style ?? currentPawn())),
     );
   }
 }
@@ -170,7 +176,8 @@ class _PawnPainter extends CustomPainter {
   final bool highlighted;
   final double glow;
   final bool dimmed;
-  _PawnPainter(this.color, this.highlighted, this.glow, this.dimmed);
+  final String style;
+  _PawnPainter(this.color, this.highlighted, this.glow, this.dimmed, this.style);
 
   @override
   void paint(Canvas canvas, Size s) {
@@ -215,9 +222,6 @@ class _PawnPainter extends CustomPainter {
       canvas.translate(0, -h * .05 * glow);
     }
 
-    final light = lighten(color, .32);
-    final dark = darken(color, .22);
-
     final edge = Paint()
       ..color = const Color(0xFF1A1A1A)
       ..style = PaintingStyle.stroke
@@ -228,6 +232,78 @@ class _PawnPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = w * .055
       ..strokeJoin = StrokeJoin.round;
+
+    if (style == 'ball') {
+      _ball(canvas, w, h, edge, outline);
+    } else if (style == 'gem') {
+      _gem(canvas, w, h, edge, outline);
+    } else {
+      _classic(canvas, w, h, edge, outline);
+    }
+
+    if (dimmed) canvas.restore();
+  }
+
+  void _ball(Canvas canvas, double w, double h, Paint edge, Paint outline) {
+    final dark = darken(color, .22);
+    final ring = Rect.fromLTWH(w * .16, h * .72, w * .68, h * .20);
+    canvas.drawOval(ring, edge);
+    canvas.drawOval(ring, outline);
+    canvas.drawOval(ring, Paint()..color = dark);
+    final c = Offset(w * .5, h * .50);
+    final r = w * .36;
+    canvas.drawCircle(c, r, edge);
+    canvas.drawCircle(c, r, outline);
+    canvas.drawCircle(
+      c,
+      r,
+      Paint()
+        ..shader = RadialGradient(
+          center: const Alignment(-.4, -.45),
+          radius: 1.0,
+          colors: [lighten(color, .55), color, dark],
+          stops: const [0, .55, 1],
+        ).createShader(Rect.fromCircle(center: c, radius: r)),
+    );
+    canvas.drawCircle(Offset(w * .39, h * .38), w * .07, Paint()..color = Colors.white.withOpacity(.85));
+  }
+
+  void _gem(Canvas canvas, double w, double h, Paint edge, Paint outline) {
+    final top = Offset(w * .5, h * .12);
+    final right = Offset(w * .86, h * .44);
+    final bottom = Offset(w * .5, h * .88);
+    final left = Offset(w * .14, h * .44);
+    final mid = Offset(w * .5, h * .44);
+    final outer = Path()
+      ..moveTo(top.dx, top.dy)
+      ..lineTo(right.dx, right.dy)
+      ..lineTo(bottom.dx, bottom.dy)
+      ..lineTo(left.dx, left.dy)
+      ..close();
+    canvas.drawPath(outer, edge);
+    canvas.drawPath(outer, outline);
+    Path tri(Offset a, Offset b, Offset c) => Path()
+      ..moveTo(a.dx, a.dy)
+      ..lineTo(b.dx, b.dy)
+      ..lineTo(c.dx, c.dy)
+      ..close();
+    canvas.drawPath(tri(top, left, mid), Paint()..color = lighten(color, .35));
+    canvas.drawPath(tri(top, right, mid), Paint()..color = lighten(color, .12));
+    canvas.drawPath(tri(left, bottom, mid), Paint()..color = color);
+    canvas.drawPath(tri(right, bottom, mid), Paint()..color = darken(color, .22));
+    canvas.drawPath(
+      outer,
+      Paint()
+        ..color = Colors.white.withOpacity(.55)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = w * .015,
+    );
+    canvas.drawCircle(Offset(w * .36, h * .30), w * .045, Paint()..color = Colors.white.withOpacity(.85));
+  }
+
+  void _classic(Canvas canvas, double w, double h, Paint edge, Paint outline) {
+    final light = lighten(color, .32);
+    final dark = darken(color, .22);
 
     // base disc
     final baseRect = Rect.fromLTWH(w * .15, h * .70, w * .70, h * .22);
@@ -295,11 +371,61 @@ class _PawnPainter extends CustomPainter {
         ).createShader(Rect.fromCircle(center: headC, radius: headR)),
     );
     canvas.drawCircle(Offset(w * .43, h * .22), w * .055, Paint()..color = Colors.white.withOpacity(.8));
-
-    if (dimmed) canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant _PawnPainter old) =>
-      old.color != color || old.highlighted != highlighted || old.glow != glow || old.dimmed != dimmed;
+      old.color != color || old.highlighted != highlighted || old.glow != glow || old.dimmed != dimmed || old.style != style;
+}
+
+/// One capture explosion: grid-unit cell centre + the colour of the captured token.
+class CaptureFx {
+  final Offset cell;
+  final Color color;
+  const CaptureFx(this.cell, this.color);
+}
+
+/// Expanding rings + flying sparks drawn over the board when a token is captured. [t] goes 0..1.
+class CaptureBurstPainter extends CustomPainter {
+  final List<CaptureFx> fx;
+  final double t;
+  CaptureBurstPainter(this.fx, this.t);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final u = size.width / 15;
+    final fade = (1 - t).clamp(0.0, 1.0);
+    final ease = Curves.easeOut.transform(t.clamp(0.0, 1.0));
+    for (final e in fx) {
+      final c = e.cell * u;
+      canvas.drawCircle(
+        c,
+        u * (.4 + 1.7 * ease),
+        Paint()
+          ..color = Colors.white.withOpacity(fade)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = u * .2 * fade,
+      );
+      canvas.drawCircle(
+        c,
+        u * (.2 + 1.1 * ease),
+        Paint()
+          ..color = e.color.withOpacity(.55 * fade)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = u * .3 * fade,
+      );
+      for (int i = 0; i < 10; i++) {
+        final a = i * 2 * pi / 10 + .3;
+        final d = u * (.3 + 1.6 * ease);
+        canvas.drawCircle(
+          c + Offset(cos(a) * d, sin(a) * d),
+          u * .17 * fade,
+          Paint()..color = (i.isEven ? e.color : Colors.white).withOpacity(fade),
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CaptureBurstPainter old) => old.t != t || old.fx != fx;
 }
